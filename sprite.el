@@ -707,14 +707,33 @@ Updates the sprite's running status and refreshes the list."
   (interactive)
   (sprite-open-frame (sprite-list--sprite-at-point)))
 
+(defun sprite--format-duration (seconds)
+  "Format SECONDS as a compact duration string, or \"?\" when nil."
+  (cond
+   ((null seconds)    "?")
+   ((< seconds 60)   (format "%ds" seconds))
+   ((< seconds 3600) (format "%dm" (/ seconds 60)))
+   (t                (format "%dh" (/ seconds 3600)))))
+
 ;;;###autoload
 (defun sprite-open-frame (sprite)
   "Open a new Emacs frame connected to SPRITE.
-When called interactively, select from accessible sprites."
+When called interactively, select from accessible sprites via
+`annotated-completing-read', annotated with status and uptime."
   (interactive
    (list (let* ((sprites (sprite-resolve-list))
-                (name (completing-read "Open frame in sprite: "
-                                      (seq-map #'sprite-name sprites) nil t)))
+                (name (annotated-completing-read
+                       (seq-map (lambda (s)
+                                  (cons (sprite-name s)
+                                        (format "%s  up:%s"
+                                                (or (sprite-running-status s) "?")
+                                                (sprite--format-duration
+                                                 (when-let* ((st (sprite-start-time s)))
+                                                   (floor (float-time
+                                                           (time-since st))))))))
+                                sprites)
+                       :prompt "sprite:"
+                       :require-match t)))
            (seq-find (lambda (s) (equal name (sprite-name s))) sprites))))
   (unless sprite
     (user-error "No sprite selected"))
