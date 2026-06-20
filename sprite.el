@@ -705,13 +705,26 @@ Updates the sprite's running status and refreshes the list."
 (defun sprite-list-open-frame ()
   "Open a new Emacs frame connected to the sprite at point."
   (interactive)
-  (let ((name (sprite-name (sprite-list--sprite-at-point))))
+  (sprite-open-frame (sprite-list--sprite-at-point)))
+
+;;;###autoload
+(defun sprite-open-frame (sprite)
+  "Open a new Emacs frame connected to SPRITE.
+When called interactively, select from accessible sprites."
+  (interactive
+   (list (let* ((sprites (sprite-resolve-list))
+                (name (completing-read "Open frame in sprite: "
+                                      (seq-map #'sprite-name sprites) nil t)))
+           (seq-find (lambda (s) (equal name (sprite-name s))) sprites))))
+  (unless sprite
+    (user-error "No sprite selected"))
+  (let ((name (sprite-name sprite)))
     (with-environment-variables (("DISPLAY" (or (getenv "DISPLAY") ":0"))
-				 ("TERM" nil))
-    (start-process
-     (format "sprite-frame-%s" name)
-     (get-buffer-create (sprite--log-buffer-name name))
-     "emacsclient" "--no-wait" "--create-frame" "--server-file" name))))
+                                 ("TERM" nil))
+      (start-process
+       (format "sprite-frame-%s" name)
+       (get-buffer-create (sprite--log-buffer-name name))
+       "emacsclient" "--no-wait" "--create-frame" "--server-file" name))))
 
 (transient-define-prefix sprite-list-menu ()
   "Actions for the sprite overview buffer."
