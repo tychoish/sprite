@@ -841,10 +841,10 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
 
 ;;;; Mode-line and savehist wiring
 
-(with-eval-after-load 'savehist
-  (add-to-list 'savehist-additional-variables 'sprite--registry-saved)
-  (add-hook 'savehist-save-hook #'sprite--registry-serialize)
-  (add-hook 'savehist-mode-hook #'sprite--registry-deserialize))
+(defvar savehist-additional-variables nil)
+(add-to-list 'savehist-additional-variables 'sprite--registry-saved)
+(add-hook 'savehist-save-hook #'sprite--registry-serialize)
+(add-hook 'savehist-mode-hook #'sprite--registry-deserialize)
 
 (provide 'sprite)
 ;;; sprite.el ends here
