@@ -24,6 +24,8 @@ jobs:
 
       - name: Set up Emacs
         uses: purcell/setup-emacs@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           version: ${{ matrix.emacs_version }}
 
