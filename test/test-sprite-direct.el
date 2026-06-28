@@ -230,6 +230,28 @@
   (should (= 1
              (sprite-direct--parse-response "-print 1\n-print 2\n"))))
 
+;;;; Response-presence predicate
+
+(ert-deftest sprite-direct/response-present-print ()
+  "`sprite-direct--response-present-p' matches a -print line."
+  (should (sprite-direct--response-present-p "-print 3\n")))
+
+(ert-deftest sprite-direct/response-present-error ()
+  "`sprite-direct--response-present-p' matches a -error line."
+  (should (sprite-direct--response-present-p "-error msg\n")))
+
+(ert-deftest sprite-direct/response-present-after-emacs-pid ()
+  "`sprite-direct--response-present-p' matches -print after -emacs-pid."
+  (should (sprite-direct--response-present-p "-emacs-pid 123\n-print 42\n")))
+
+(ert-deftest sprite-direct/response-present-pid-only ()
+  "`sprite-direct--response-present-p' returns nil for only -emacs-pid."
+  (should-not (sprite-direct--response-present-p "-emacs-pid 123\n")))
+
+(ert-deftest sprite-direct/response-present-empty ()
+  "`sprite-direct--response-present-p' returns nil for empty string."
+  (should-not (sprite-direct--response-present-p "")))
+
 ;;;; Auth file reading
 
 (ert-deftest sprite-direct/read-auth-key-present ()

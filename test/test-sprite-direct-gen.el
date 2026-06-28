@@ -53,11 +53,20 @@ The conn's plist has :type unix, :path \"/tmp/test\", :key \"testkey\"."
   (sprite-direct-gen-test/with-mock-conn conn
     (should (equal "testkey" (map-elt (sprite-direct-conn-plist conn) :key)))))
 
-(ert-deftest sprite-direct-gen/open-signals-without-auth ()
-  "`sprite-direct-open' signals `user-error' when the auth key is unavailable."
+(ert-deftest sprite-direct-gen/open-signals-without-auth-for-tcp ()
+  "`sprite-direct-open' signals `user-error' for a TCP target with no auth key."
+  (cl-letf (((symbol-function 'sprite-direct--parse-connection)
+              (lambda (_) (list :type 'tcp :host "localhost" :port 1234 :key nil))))
+    (should-error (sprite-direct-open "localhost:1234:") :type 'user-error)))
+
+(ert-deftest sprite-direct-gen/open-unix-without-auth-key ()
+  "`sprite-direct-open' succeeds for a Unix socket with nil auth key.
+Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (cl-letf (((symbol-function 'sprite-direct--parse-connection)
               (lambda (_) (list :type 'unix :path "/tmp/x" :key nil))))
-    (should-error (sprite-direct-open "no-such-sprite") :type 'user-error)))
+    (let ((conn (sprite-direct-open "no-auth-unix")))
+      (should (sprite-direct-conn-p conn))
+      (should-not (map-elt (sprite-direct-conn-plist conn) :key)))))
 
 (ert-deftest sprite-direct-gen/open-returns-conn-with-auth ()
   "`sprite-direct-open' returns a conn when the auth key is present."

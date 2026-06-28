@@ -185,10 +185,13 @@ Returns the live process.  Signals an error and kills the buffer on failure."
        (signal (car err) (cdr err))))))
 
 (defun sprite-direct--send (proc key form)
-  "Send an eval request for FORM with auth KEY to PROC."
+  "Send an eval request for FORM to PROC, authenticating with KEY when non-nil.
+Emacs 29+ authenticates local Unix sockets via peer UID (SO_PEERCRED) rather
+than cookie files, so KEY may be nil for local connections."
   (process-send-string
    proc
-   (concat "-auth " key " -eval "
+   (concat (when key (concat "-auth " key " "))
+           "-eval "
            (sprite-direct--encode (format "%S" form))
            " \n")))
 
@@ -226,10 +229,13 @@ Does not own a persistent socket; each operation opens a transient one."
 (defun sprite-direct-open (target)
   "Return a `sprite-direct-conn' for TARGET.
 TARGET is a Unix socket name (e.g. \"work.0.render\") or HOST:PORT:KEY.
-Signals `user-error' immediately if no auth key can be found."
+For TCP targets an auth key is required and `user-error' is signalled when
+none is found.  For Unix sockets the auth key is optional: Emacs 29+
+authenticates local connections via peer UID, so no cookie file is written."
   (let ((plist (sprite-direct--parse-connection target)))
-    (unless (map-elt plist :key)
-      (user-error "sprite-direct: no auth key found for %S" target))
+    (when (and (null (map-elt plist :key))
+               (eq (map-elt plist :type) 'tcp))
+      (user-error "sprite-direct: no auth key found for TCP target %S" target))
     (sprite-direct--conn-make :target target :plist plist)))
 
 (cl-defmacro with-sprite-direct ((var target) &rest body)
@@ -244,13 +250,20 @@ TARGET is evaluated once; the conn is created by `sprite-direct-open'."
 
 ;;;; Generator-based receive
 
+(defun sprite-direct--response-present-p (str)
+  "Return t when STR contains a recognisable server result line.
+Matches `-print' or `-error' at the start of a line.  The check is more
+specific than looking for any newline because the server sends
+`-emacs-pid PID\\n' immediately on connection open, before the eval result."
+  (string-match-p "\\(?:^\\|\n\\)-\\(?:print\\|error\\) " str))
+
 (iter-defun sprite-direct--recv-gen (proc)
-  "Generator that yields `:pending' until PROC's buffer contains a newline.
+  "Generator that yields `:pending' until PROC's buffer has a result line.
 The final return value is the raw response string, or nil when PROC dies
-before a complete response arrives."
+before a `-print' or `-error' line arrives."
   (while (and (process-live-p proc)
               (with-current-buffer (process-buffer proc)
-                (not (string-match-p "\n" (buffer-string)))))
+                (not (sprite-direct--response-present-p (buffer-string)))))
     (iter-yield :pending))
   (when-let* ((buf (process-buffer proc))
               ((buffer-live-p buf)))
