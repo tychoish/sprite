@@ -53,21 +53,24 @@ Always logs: sprite-session: idle timer <running|stopped> (<N> registered ops)"
         (sprite-session-start-idle-timer))
     (when sprite-session--idle-timer
       (sprite-session-stop-idle-timer)))
-  (message "sprite-session: idle timer %s (%d registered ops)"
-           (if sprite-session--idle-timer "running" "stopped")
-           (length sprite-session-idle-hook)))
+  (let ((inhibit-message t))
+    (message "sprite-session: idle timer %s (%d registered ops)"
+             (if sprite-session--idle-timer "running" "stopped")
+             (length sprite-session-idle-hook))))
 
 (defun sprite-session-add-on-idle (fn)
   "Add FN to `sprite-session-idle-hook' and start the timer if needed.
 Logs the registration and delegates to `sprite-session-sync-idle-timer'."
-  (message "sprite-session: registered idle op: %s" (symbol-name fn))
+  (let ((inhibit-message t))
+    (message "sprite-session: registered idle op: %s" (symbol-name fn)))
   (add-hook 'sprite-session-idle-hook fn)
   (sprite-session-sync-idle-timer))
 
 (defun sprite-session-remove-on-idle (fn)
   "Remove FN from `sprite-session-idle-hook' and stop the timer if the hook is empty.
 Logs the deregistration and delegates to `sprite-session-sync-idle-timer'."
-  (message "sprite-session: deregistered idle op: %s" (symbol-name fn))
+  (let ((inhibit-message t))
+    (message "sprite-session: deregistered idle op: %s" (symbol-name fn)))
   (remove-hook 'sprite-session-idle-hook fn)
   (sprite-session-sync-idle-timer))
 
