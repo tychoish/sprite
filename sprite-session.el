@@ -97,10 +97,9 @@ with DBus support and systemd-logind.")
        (eq system-type 'gnu/linux)))
 
 (defun sprite-session--on-prepare-for-sleep (going-to-sleep)
-  "Dispatch sleep/wake hooks based on GOING-TO-SLEEP."
-  (if going-to-sleep
-      (run-hooks 'sprite-session-before-sleep-hook)
-    (run-hooks 'sprite-session-after-sleep-hook)))
+  "Run before-sleep hook when GOING-TO-SLEEP; do nothing on wake."
+  (when going-to-sleep
+    (run-hooks 'sprite-session-before-sleep-hook)))
 
 (defun sprite-session-start-logind-watch ()
   "Register a DBus signal to run sleep/wake hooks on system transitions.
