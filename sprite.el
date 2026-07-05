@@ -205,7 +205,8 @@ If FULL-NAME is nil, returns path under the sprite root."
   spawned-by
   start-time
   last-contact
-  running-status)
+  running-status
+  startup)  ; nil | 'sync | 'idle — non-nil marks a declared definition
 
 (defvar sprite--registry (make-hash-table :test #'equal)
   "In-memory registry mapping full-name strings to `sprite' structs.")
@@ -240,7 +241,8 @@ A list of plists; populated by `sprite--registry-serialize'.")
         :state-dir (sprite-state-dir s)
         :spawned-by (sprite-spawned-by s)
         :start-time (sprite-start-time s)
-        :last-contact (sprite-last-contact s)))
+        :last-contact (sprite-last-contact s)
+        :startup (sprite-startup s)))
 
 (defun sprite--plist-to-struct (plist)
   "Reconstruct a sprite struct from PLIST."
@@ -253,7 +255,8 @@ A list of plists; populated by `sprite--registry-serialize'.")
    :state-dir (plist-get plist :state-dir)
    :spawned-by (plist-get plist :spawned-by)
    :start-time (plist-get plist :start-time)
-   :last-contact (plist-get plist :last-contact)))
+   :last-contact (plist-get plist :last-contact)
+   :startup (plist-get plist :startup)))
 
 (defun sprite--registry-serialize ()
   "Serialize the registry to `sprite--registry-saved' for savehist."
@@ -326,6 +329,64 @@ Adds discovered sprite not in the registry.  Does not remove entries."
             (unless (sprite--registry-get name)
               (sprite--registry-put (sprite--make-from-state-dir name))))
           (sprite--discover-state-dirs)))
+
+;;;; Definitions — declared sub-sprite instances
+
+(defun sprite--provisional-p (s)
+  "Return non-nil when S is a declared definition not yet spawned.
+Provisional entries carry a `startup' value but have no numeric index."
+  (and (sprite-startup s) (null (sprite-idx s))))
+
+(cl-defun sprite-define (&key unique-name (parent (sprite-instance-name)) (startup 'idle))
+  "Declare that a sprite named UNIQUE-NAME should exist under PARENT.
+STARTUP controls creation when absent:
+  `sync'  — create immediately when `sprite-defs-activate' runs.
+  `idle'  — create on the next Emacs idle period after activation.
+Definitions persist across sessions via savehist.  Returns the
+provisional sprite struct."
+  (unless unique-name
+    (user-error "sprite-define: :unique-name is required"))
+  (let* ((key (format "%s.%s" parent unique-name))
+         (s (or (sprite--registry-get key)
+                (sprite--make :name key :parent parent :unique-name unique-name))))
+    (setf (sprite-startup s) startup)
+    (sprite--registry-put s)
+    s))
+
+(defun sprite-defs-activate ()
+  "Reconcile declared definitions with the running instance.
+For each provisional entry whose :parent matches `sprite-instance-name':
+  - If a real sprite with the same (parent, unique-name) is already in
+    the registry, promote it (copy startup, remove provisional entry).
+  - If absent and startup is `sync', create the sprite immediately.
+  - If absent and startup is `idle', schedule via the session idle hook."
+  (let ((self (sprite-instance-name)))
+    (seq-do
+     (lambda (s)
+       (when (and (sprite--provisional-p s) (equal (sprite-parent s) self))
+         (let ((live (seq-find (lambda (r)
+                                 (and (sprite--full-name-p (sprite-name r))
+                                      (equal (sprite-parent r) (sprite-parent s))
+                                      (equal (sprite-unique-name r) (sprite-unique-name s))))
+                               (sprite--registry-all))))
+           (cond
+            (live
+             (setf (sprite-startup live) (sprite-startup s))
+             (sprite--registry-remove (sprite-name s)))
+            ((eq (sprite-startup s) 'sync)
+             (let ((new-s (sprite-create (sprite-unique-name s))))
+               (setf (sprite-startup new-s) (sprite-startup s))
+               (sprite--registry-put new-s)
+               (sprite--registry-remove (sprite-name s))))
+            (t
+             (sprite-session-add-on-idle #'sprite-defs-activate-idle-check))))))
+     (sprite--registry-all))))
+
+(defun sprite-defs-activate-idle-check ()
+  "Idle hook: activate pending definitions; deregister when none remain."
+  (sprite-defs-activate)
+  (unless (seq-some #'sprite--provisional-p (sprite--registry-all))
+    (sprite-session-remove-on-idle #'sprite-defs-activate-idle-check)))
 
 ;;;; Lifecycle
 
@@ -538,21 +599,41 @@ Returns \"?\" when SECONDS is nil."
   "Return t if sprite S belongs to the current parent instance."
   (equal (sprite-parent s) (sprite-instance-name)))
 
+(defun sprite--decommissioned-p (full-name)
+  "Return non-nil when FULL-NAME has a DECOMMISSIONED marker in its state dir."
+  (file-exists-p
+   (expand-file-name "DECOMMISSIONED"
+                     (sprite-state-directory full-name))))
+
+(defun sprite--live-p (s)
+  "Return non-nil when S should appear in the overview list.
+Provisional (unspawned) definitions are always live.
+Full entries are live when not decommissioned."
+  (or (sprite--provisional-p s)
+      (not (sprite--decommissioned-p (sprite-name s)))))
+
 (defun sprite--build-list-entry (s)
   "Build a `tabulated-list' entry for sprite struct S."
-  (let* ((name (sprite-name s))
+  (let* ((provisional (sprite--provisional-p s))
+         (name (sprite-name s))
          (uptime (when (sprite-start-time s)
                    (float-time (time-since (sprite-start-time s)))))
          (last-seen (when (sprite-last-contact s)
                       (float-time (time-since (sprite-last-contact s)))))
-         (buffers (or (sprite--query-buffer-count name) "?"))
+         (buffers (if provisional "—" (or (sprite--query-buffer-count name) "?")))
          (spawned-by (or (sprite-spawned-by s) "")))
     (list s
           (vector
-           (number-to-string (sprite-idx s))
-           name
-           (sprite--format-uptime uptime)
-           (if (numberp buffers) (number-to-string buffers) "?")
+           (if (sprite-idx s) (number-to-string (sprite-idx s)) "?")
+           (cond ((eq (sprite-startup s) 'sync) "S")
+                 ((eq (sprite-startup s) 'idle) "I")
+                 (t " "))
+           (if provisional (sprite-unique-name s) name)
+           (if provisional
+               (format "(pending %s)" (sprite-startup s))
+             (sprite--format-uptime uptime))
+           (if (stringp buffers) buffers
+             (number-to-string buffers))
            (sprite--format-uptime last-seen)
            spawned-by))))
 
@@ -568,6 +649,7 @@ Returns \"?\" when SECONDS is nil."
                         :unique-name name)
           (vector
            "-"
+           " "
            (propertize name 'face 'bold)
            (sprite--format-uptime uptime)
            (number-to-string buffers)
@@ -588,6 +670,7 @@ Returns \"?\" when SECONDS is nil."
     (define-key map (kbd "o") #'sprite-list-open-log)
     (define-key map (kbd "f") #'sprite-list-open-frame)
     (define-key map (kbd "g") #'sprite-list-refresh)
+    (define-key map (kbd "i") #'sprite-list-info)
     (define-key map (kbd "?") #'sprite-list-menu)
     (define-key map (kbd "m") #'sprite-list-menu)
     map)
@@ -600,6 +683,7 @@ Returns \"?\" when SECONDS is nil."
   (setq tabulated-list-format
         (vector
          '("#"          4  t)
+         '("Def"        4  nil)
          '("Name"      30  t)
          '("Uptime"    10  nil)
          '("Buffers"    7  nil)
@@ -620,6 +704,41 @@ Returns \"?\" when SECONDS is nil."
                                    (sprite--live-p s))))
                 (seq-map #'sprite--build-list-entry))))
   (tabulated-list-print t))
+
+(defvar sprite-info-map (make-sparse-keymap)
+  "Keymap for sprite info help buffers.  Inherits `help-mode-map' once loaded.
+Add context-specific bindings here.")
+
+(with-eval-after-load 'help-mode
+  (set-keymap-parent sprite-info-map help-mode-map))
+
+(defun sprite-list-info ()
+  "Show a help-window detail buffer for the sprite at point."
+  (interactive)
+  (when-let* ((s (tabulated-list-get-id))
+              (buf-name (format "*Sprite Info: %s*" (sprite-name s))))
+    (with-help-window buf-name
+      (princ (format "Sprite: %s\n\n" (sprite-name s)))
+      (princ (format "  Parent:       %s\n" (or (sprite-parent s) "(root)")))
+      (princ (format "  Unique name:  %s\n" (or (sprite-unique-name s) "")))
+      (princ (format "  Index:        %s\n"
+                     (if (sprite-idx s) (number-to-string (sprite-idx s)) "(unspawned)")))
+      (princ (format "  Startup:      %s\n" (or (sprite-startup s) "(none)")))
+      (princ (format "  PID:          %s\n" (or (sprite-pid s) "—")))
+      (princ (format "  State dir:    %s\n" (or (sprite-state-dir s) "—")))
+      (princ (format "  Start time:   %s\n"
+                     (if (sprite-start-time s)
+                         (format-time-string "%F %T" (sprite-start-time s))
+                       "—")))
+      (princ (format "  Last contact: %s\n"
+                     (if (sprite-last-contact s)
+                         (format-time-string "%F %T" (sprite-last-contact s))
+                       "—")))
+      (princ (format "  Status:       %s\n" (or (sprite-running-status s) "unknown")))
+      (princ (format "  Spawned by:   %s\n" (or (sprite-spawned-by s) "—"))))
+    (when-let* ((buf (get-buffer buf-name)))
+      (with-current-buffer buf
+        (use-local-map sprite-info-map)))))
 
 (defun sprite-list ()
   "Open the sprite overview buffer."

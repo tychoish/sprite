@@ -410,7 +410,7 @@
   (should (get 'sprite-list-mode 'derived-mode-parent)))
 
 (ert-deftest sprite/build-list-entry-structure ()
-  "build-list-entry returns (STRUCT VECTOR) with 6 columns."
+  "build-list-entry returns (STRUCT VECTOR) with 7 columns: # Def Name Uptime Buffers Last-Seen Spawned-By."
   (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil))
             ((symbol-function 'sprite--decommissioned-p) (lambda (_) nil)))
     (let ((s (sprite--make :name "work.0.render" :idx 0
@@ -420,17 +420,17 @@
              (id (car entry))
              (vec (cadr entry)))
         (should (sprite-p id))
-        (should (= 6 (length vec)))
+        (should (= 7 (length vec)))
         (should (equal "0" (aref vec 0)))
-        (should (equal "work.0.render" (aref vec 1)))
-        (should (equal "scratch" (aref vec 5)))))))
+        (should (equal "work.0.render" (aref vec 2)))
+        (should (equal "scratch" (aref vec 6)))))))
 
 (ert-deftest sprite/build-list-entry-uptime-nil-when-no-start ()
   (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil)))
     (let ((s (sprite--make :name "work.0.render" :idx 0
                            :parent "work" :unique-name "render")))
       (let ((vec (cadr (sprite--build-list-entry s))))
-        (should (equal "?" (aref vec 2)))))))
+        (should (equal "?" (aref vec 3)))))))
 
 (ert-deftest sprite/build-list-entry-buffers-unknown ()
   (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil)))
@@ -734,6 +734,132 @@
   "sprite--registry-saved is in savehist-additional-variables after loading."
   (when (featurep 'savehist)
     (should (member 'sprite--registry-saved savehist-additional-variables))))
+
+;;;; sprite--provisional-p
+
+(ert-deftest sprite/provisional-p-true-when-startup-and-no-idx ()
+  "A struct with :startup set and no :idx is provisional."
+  (let ((s (sprite--make :name "work.render" :parent "work"
+                         :unique-name "render" :startup 'idle)))
+    (should (sprite--provisional-p s))))
+
+(ert-deftest sprite/provisional-p-false-when-idx-present ()
+  "A struct with a numeric :idx is not provisional even if :startup is set."
+  (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
+                         :unique-name "render" :startup 'idle)))
+    (should-not (sprite--provisional-p s))))
+
+(ert-deftest sprite/provisional-p-false-when-no-startup ()
+  "A struct with no :startup is not provisional even without an :idx."
+  (let ((s (sprite--make :name "work.render" :parent "work" :unique-name "render")))
+    (should-not (sprite--provisional-p s))))
+
+;;;; sprite-define
+
+(ert-deftest sprite/define-creates-provisional-entry ()
+  "`sprite-define' adds a provisional entry to the registry."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "worker")
+      (should (= 1 (hash-table-count sprite--registry))))))
+
+(ert-deftest sprite/define-uses-parent-dot-name-key ()
+  "`sprite-define' keys the entry as PARENT.UNIQUE-NAME."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "worker")
+      (should (sprite--registry-get "work.worker")))))
+
+(ert-deftest sprite/define-stores-startup-mode ()
+  "The :startup value is stored on the provisional struct."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "w" :startup 'sync)
+      (let ((s (sprite--registry-get "work.w")))
+        (should (eq 'sync (sprite-startup s)))))))
+
+(ert-deftest sprite/define-defaults-startup-to-idle ()
+  "`sprite-define' uses `idle' when :startup is omitted."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "w")
+      (should (eq 'idle (sprite-startup (sprite--registry-get "work.w")))))))
+
+(ert-deftest sprite/define-uses-explicit-parent ()
+  ":parent overrides the current instance name."
+  (sprite-test/with-registry
+    (sprite-define :unique-name "w" :parent "other")
+    (should (sprite--registry-get "other.w"))))
+
+(ert-deftest sprite/define-idempotent-updates-startup ()
+  "Calling `sprite-define' again with the same name updates :startup."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "w" :startup 'idle)
+      (sprite-define :unique-name "w" :startup 'sync)
+      (should (= 1 (hash-table-count sprite--registry)))
+      (should (eq 'sync (sprite-startup (sprite--registry-get "work.w")))))))
+
+(ert-deftest sprite/define-requires-unique-name ()
+  "`sprite-define' signals `user-error' when :unique-name is omitted."
+  (sprite-test/with-registry
+    (should-error (sprite-define) :type 'user-error)))
+
+;;;; sprite-defs-activate — promote case
+
+(ert-deftest sprite/defs-activate-promotes-matching-real-sprite ()
+  "When a real sprite with matching parent+unique-name exists, definitions promote it."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      ;; Provisional definition
+      (sprite-define :unique-name "render" :startup 'sync)
+      ;; Real sprite already in registry (simulate discovered/live)
+      (sprite--registry-put (sprite--make :name "work.0.render" :idx 0
+                                          :parent "work" :unique-name "render"))
+      (sprite-defs-activate)
+      ;; Provisional entry removed
+      (should (null (sprite--registry-get "work.render")))
+      ;; Real entry promoted: startup copied
+      (let ((real (sprite--registry-get "work.0.render")))
+        (should real)
+        (should (eq 'sync (sprite-startup real)))))))
+
+(ert-deftest sprite/defs-activate-leaves-other-instance-definitions-alone ()
+  "Definitions for a different parent are not activated."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite-define :unique-name "w" :parent "other" :startup 'sync)
+      (sprite-defs-activate)
+      ;; Still in registry — parent mismatch, not our business
+      (should (sprite--registry-get "other.w")))))
+
+(ert-deftest sprite/defs-activate-no-op-when-no-definitions ()
+  "`sprite-defs-activate' is silent on an empty or definition-free registry."
+  (sprite-test/with-registry
+    (let ((sprite-instance-id "work"))
+      (sprite--registry-put (sprite--make :name "work.0.render" :idx 0
+                                          :parent "work" :unique-name "render"))
+      (sprite-defs-activate)
+      (should (sprite--registry-get "work.0.render")))))
+
+;;;; startup slot serialization
+
+(ert-deftest sprite/startup-slot-survives-serialization ()
+  "The :startup slot is preserved through serialize → deserialize."
+  (sprite-test/with-registry
+    (let* ((s (sprite--make :name "work.render" :parent "work"
+                            :unique-name "render" :startup 'idle))
+           (plist (sprite--struct-to-plist s))
+           (restored (sprite--plist-to-struct plist)))
+      (should (eq 'idle (sprite-startup restored))))))
+
+(ert-deftest sprite/startup-slot-nil-survives-serialization ()
+  "A nil :startup slot is preserved as nil through serialize → deserialize."
+  (sprite-test/with-registry
+    (let* ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
+                            :unique-name "render"))
+           (restored (sprite--plist-to-struct (sprite--struct-to-plist s))))
+      (should (null (sprite-startup restored))))))
 
 (provide 'test-sprite)
 ;;; test-sprite.el ends here

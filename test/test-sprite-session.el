@@ -319,13 +319,21 @@ Cancels any timer created during BODY on exit."
       (sprite-session--on-prepare-for-sleep t)
       (should (eq 'sprite-session-before-sleep-hook run-hooks-arg)))))
 
-(ert-deftest sprite-session/on-prepare-for-sleep-skips-hook-when-waking ()
-  "`sprite-session--on-prepare-for-sleep' does not run the hook on wake (arg nil)."
+(ert-deftest sprite-session/on-prepare-for-sleep-runs-after-sleep-hook-on-wake ()
+  "`sprite-session--on-prepare-for-sleep' runs the after-sleep hook on wake (arg nil)."
   (let (run-hooks-arg)
     (cl-letf (((symbol-function 'run-hooks)
                (lambda (hook) (setq run-hooks-arg hook))))
       (sprite-session--on-prepare-for-sleep nil)
-      (should-not run-hooks-arg))))
+      (should (eq 'sprite-session-after-sleep-hook run-hooks-arg)))))
+
+(ert-deftest sprite-session/on-prepare-for-sleep-does-not-run-before-sleep-on-wake ()
+  "The before-sleep hook must not fire on wake — only the after-sleep hook should."
+  (let (hooks-run)
+    (cl-letf (((symbol-function 'run-hooks)
+               (lambda (hook) (push hook hooks-run))))
+      (sprite-session--on-prepare-for-sleep nil)
+      (should-not (memq 'sprite-session-before-sleep-hook hooks-run)))))
 
 (provide 'test-sprite-session)
 ;;; test-sprite-session.el ends here
