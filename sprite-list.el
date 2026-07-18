@@ -2,7 +2,7 @@
 
 ;; Author: Sam Kleinman
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (seq "2.24") (transient "0.4") (sprite "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (seq "2.24") (transient "0.4"))
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
