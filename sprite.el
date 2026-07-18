@@ -717,7 +717,12 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
 (defvar savehist-additional-variables nil)
 (add-to-list 'savehist-additional-variables 'sprite--registry-saved)
 (add-hook 'savehist-save-hook #'sprite--registry-serialize)
-(add-hook 'savehist-mode-hook #'sprite--registry-deserialize)
+
+;; Explicit depths, not call order: `sprite-defs-activate' needs the
+;; registry already populated, so `sprite--registry-deserialize' must
+;; run first.
+(add-hook 'savehist-mode-hook #'sprite--registry-deserialize -10)
+(add-hook 'savehist-mode-hook #'sprite-defs-activate)
 
 (provide 'sprite)
 ;;; sprite.el ends here

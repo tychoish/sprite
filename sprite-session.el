@@ -58,6 +58,7 @@ Always logs: sprite-session: idle timer <running|stopped> (<N> registered ops)"
              (if sprite-session--idle-timer "running" "stopped")
              (length sprite-session-idle-hook))))
 
+;;;###autoload
 (defun sprite-session-add-on-idle (fn)
   "Add FN to `sprite-session-idle-hook' and start the timer if needed.
 Logs the registration and delegates to `sprite-session-sync-idle-timer'."
@@ -66,6 +67,7 @@ Logs the registration and delegates to `sprite-session-sync-idle-timer'."
   (add-hook 'sprite-session-idle-hook fn)
   (sprite-session-sync-idle-timer))
 
+;;;###autoload
 (defun sprite-session-remove-on-idle (fn)
   "Remove FN from `sprite-session-idle-hook' and stop the timer if the hook is empty.
 Logs the deregistration and delegates to `sprite-session-sync-idle-timer'."
