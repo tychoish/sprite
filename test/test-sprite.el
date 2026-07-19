@@ -28,6 +28,7 @@
 (defvar argv)
 
 (require 'sprite)
+(require 'sprite-list)
 
 ;; In batch/test mode there is no running daemon and no CLI override, so
 ;; sprite-resolve-instance-id would fall through to "solo".  Pin it to "work"
