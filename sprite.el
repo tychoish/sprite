@@ -104,7 +104,9 @@ chain must be re-evaluated."
   "Return the instance-scoped filename prefix for NAME.
 Produces HOSTNAME-INSTANCE-NAME[-USERNAME] where USERNAME is included
 only when running as root or under a symlinked `user-emacs-directory'."
-  (pcase-let ((`(,host ,instance) (sprite-conf-host-and-instance)))
+  (let* ((host-and-instance (sprite-conf-host-and-instance))
+         (host (nth 0 host-and-instance))
+         (instance (nth 1 host-and-instance)))
     (string-join
      (seq-filter #'identity
                  (list host instance name
@@ -318,7 +320,9 @@ A list of plists; populated by `sprite--registry-serialize'.")
 (defun sprite--make-from-state-dir (full-name)
   "Create a minimal sprite struct from a discovered state directory name FULL-NAME."
   (if-let* ((parts (sprite--parse-full-name full-name)))
-    (pcase-let ((`(,parent ,idx ,unique-name) parts))
+    (let ((parent (nth 0 parts))
+          (idx (nth 1 parts))
+          (unique-name (nth 2 parts)))
       (sprite--make :name full-name
                     :idx idx
                     :parent parent
