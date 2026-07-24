@@ -716,17 +716,60 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
                         active-count sprite-max-count)
           (sprite-create (format "worker-%d" active-count))))))
 
-;;;; Mode-line and savehist wiring
+;;;; Global minor mode
 
 (defvar savehist-additional-variables nil)
-(add-to-list 'savehist-additional-variables 'sprite--registry-saved)
-(add-hook 'savehist-save-hook #'sprite--registry-serialize)
 
-;; Explicit depths, not call order: `sprite-defs-activate' needs the
-;; registry already populated, so `sprite--registry-deserialize' must
-;; run first.
-(add-hook 'savehist-mode-hook #'sprite--registry-deserialize -10)
-(add-hook 'savehist-mode-hook #'sprite-defs-activate)
+(defun sprite-mode--enable ()
+  "Wire the sprite registry into `savehist' persistence and populate it.
+Registers `sprite--registry-saved' with `savehist-additional-variables' and
+hooks the serialize/deserialize/activate/discovery steps onto `savehist' so
+the registry survives across sessions, then scans the filesystem for
+sprites already running to populate the in-memory registry immediately."
+  (add-to-list 'savehist-additional-variables 'sprite--registry-saved)
+  (add-hook 'savehist-save-hook #'sprite--registry-serialize)
+  ;; Explicit depths, not call order: `sprite-defs-activate' and
+  ;; `sprite--discover-and-sync-registry' need the registry already
+  ;; populated, so `sprite--registry-deserialize' must run first.
+  (add-hook 'savehist-mode-hook #'sprite--registry-deserialize -10)
+  (add-hook 'savehist-mode-hook #'sprite-defs-activate)
+  (add-hook 'savehist-mode-hook #'sprite--discover-and-sync-registry 10)
+  ;; `savehist-mode-hook' only fires on the transition to enabled; if
+  ;; `savehist-mode' is already on by the time `sprite-mode' is turned on,
+  ;; run the same reconciliation steps directly.
+  (when (bound-and-true-p savehist-mode)
+    (sprite--registry-deserialize)
+    (sprite-defs-activate))
+  (sprite--discover-and-sync-registry))
+
+(defun sprite-mode--disable ()
+  "Undo `sprite-mode--enable': remove sprite's `savehist' hooks and variable."
+  (setq savehist-additional-variables
+        (delq 'sprite--registry-saved savehist-additional-variables))
+  (remove-hook 'savehist-save-hook #'sprite--registry-serialize)
+  (remove-hook 'savehist-mode-hook #'sprite--registry-deserialize)
+  (remove-hook 'savehist-mode-hook #'sprite-defs-activate)
+  (remove-hook 'savehist-mode-hook #'sprite--discover-and-sync-registry))
+
+(defvar-keymap sprite-mode-map
+  "c" #'sprite-create
+  "l" #'sprite-list
+  "o" #'sprite-open-frame
+  "n" #'sprite-get-or-create-next)
+
+;;;###autoload
+(define-minor-mode sprite-mode
+  "Global minor mode for managing sprite (subordinate Emacs daemon) state.
+Enabling wires the registry into `savehist' persistence and scans the
+filesystem for already-running sprites to populate the registry;
+disabling removes the `savehist' hooks and variable registration.
+See `sprite-mode-map' for commands."
+  :global t
+  :group 'sprite
+  :keymap sprite-mode-map
+  (if sprite-mode
+      (sprite-mode--enable)
+    (sprite-mode--disable)))
 
 (provide 'sprite)
 ;;; sprite.el ends here

@@ -20,6 +20,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'map)
+(require 'savehist)
 
 ;; Declare argi/argv as special so let-bindings in tests create dynamic
 ;; bindings visible to sprite-cli-resolve-id (which is compiled under
@@ -729,12 +730,87 @@
     (should (equal "myhost-myinst-myfile-alice"
                    (sprite-state-file-prefix "myfile")))))
 
-;;;; Savehist wiring
+;;;; sprite-mode — savehist wiring
 
-(ert-deftest sprite/savehist-variable-registered ()
-  "sprite--registry-saved is in savehist-additional-variables after loading."
-  (when (featurep 'savehist)
-    (should (member 'sprite--registry-saved savehist-additional-variables))))
+(defmacro sprite-test/with-isolated-mode-hooks (&rest body)
+  "Run BODY with fresh, isolated savehist hook/variable state for `sprite-mode'."
+  `(let (savehist-additional-variables savehist-save-hook savehist-mode-hook)
+     ,@body))
+
+(ert-deftest sprite/mode-enable-registers-savehist-variable ()
+  "sprite-mode--enable adds sprite--registry-saved to savehist-additional-variables."
+  (sprite-test/with-isolated-mode-hooks
+   (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore))
+     (sprite-mode--enable)
+     (should (member 'sprite--registry-saved savehist-additional-variables)))))
+
+(ert-deftest sprite/mode-disable-removes-savehist-variable ()
+  "sprite-mode--disable removes sprite--registry-saved from savehist-additional-variables."
+  (sprite-test/with-isolated-mode-hooks
+   (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore))
+     (sprite-mode--enable)
+     (sprite-mode--disable)
+     (should-not (member 'sprite--registry-saved savehist-additional-variables)))))
+
+(ert-deftest sprite/mode-enable-registers-savehist-hooks ()
+  "sprite-mode--enable hooks serialize/deserialize/activate/discovery onto savehist."
+  (sprite-test/with-isolated-mode-hooks
+   (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore))
+     (sprite-mode--enable)
+     (should (memq 'sprite--registry-serialize savehist-save-hook))
+     (should (memq 'sprite--registry-deserialize savehist-mode-hook))
+     (should (memq 'sprite-defs-activate savehist-mode-hook))
+     (should (memq 'sprite--discover-and-sync-registry savehist-mode-hook)))))
+
+(ert-deftest sprite/mode-disable-removes-savehist-hooks ()
+  "sprite-mode--disable removes all hooks added by sprite-mode--enable."
+  (sprite-test/with-isolated-mode-hooks
+   (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore))
+     (sprite-mode--enable)
+     (sprite-mode--disable)
+     (should-not (memq 'sprite--registry-serialize savehist-save-hook))
+     (should-not (memq 'sprite--registry-deserialize savehist-mode-hook))
+     (should-not (memq 'sprite-defs-activate savehist-mode-hook))
+     (should-not (memq 'sprite--discover-and-sync-registry savehist-mode-hook)))))
+
+(ert-deftest sprite/mode-enable-scans-for-active-sprites ()
+  "sprite-mode--enable calls sprite--discover-and-sync-registry to populate the cache."
+  (sprite-test/with-isolated-mode-hooks
+   (let (called)
+     (cl-letf (((symbol-function 'sprite--discover-and-sync-registry)
+                (lambda () (setq called t))))
+       (sprite-mode--enable)
+       (should called)))))
+
+(ert-deftest sprite/mode-enable-reconciles-immediately-when-savehist-already-active ()
+  "sprite-mode--enable runs deserialize/activate immediately if savehist-mode is already on."
+  (sprite-test/with-isolated-mode-hooks
+   (let ((savehist-mode t) deserialize-called activate-called)
+     (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore)
+               ((symbol-function 'sprite--registry-deserialize)
+                (lambda () (setq deserialize-called t)))
+               ((symbol-function 'sprite-defs-activate)
+                (lambda () (setq activate-called t))))
+       (sprite-mode--enable)
+       (should deserialize-called)
+       (should activate-called)))))
+
+(ert-deftest sprite/mode-enable-skips-immediate-reconcile-when-savehist-inactive ()
+  "sprite-mode--enable does not call deserialize/activate directly when savehist-mode is off."
+  (sprite-test/with-isolated-mode-hooks
+   (let ((savehist-mode nil) deserialize-called)
+     (cl-letf (((symbol-function 'sprite--discover-and-sync-registry) #'ignore)
+               ((symbol-function 'sprite--registry-deserialize)
+                (lambda () (setq deserialize-called t))))
+       (sprite-mode--enable)
+       (should-not deserialize-called)))))
+
+(ert-deftest sprite/mode-map-binds-core-commands ()
+  "sprite-mode-map binds the primary entry points to single keys."
+  (should (eq #'sprite-create (keymap-lookup sprite-mode-map "c")))
+  (should (eq #'sprite-list (keymap-lookup sprite-mode-map "l")))
+  (should (eq #'sprite-open-frame (keymap-lookup sprite-mode-map "o")))
+  (should (eq #'sprite-get-or-create-next (keymap-lookup sprite-mode-map "n"))))
 
 ;;;; sprite--provisional-p
 
