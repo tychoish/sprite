@@ -720,6 +720,34 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
 
 (defvar savehist-additional-variables nil)
 
+(defvar-keymap sprite-mode-command-map
+  "c" #'sprite-create
+  "l" #'sprite-list
+  "o" #'sprite-open-frame
+  "n" #'sprite-get-or-create-next)
+
+(defcustom sprite-mode-map-prefix nil
+  "Cons of (KEY . KEYMAP-SYMBOL) controlling where
+`sprite-mode-command-map' is bound as a nested prefix keymap. Applied
+when `sprite-mode' is enabled and removed when it is disabled. Set to
+nil to skip binding it into any parent keymap."
+  :type '(choice (const :tag "Do not bind" nil)
+                 (cons (string :tag "Key") (symbol :tag "Keymap")))
+  :group 'sprite)
+
+(defun sprite-mode--bind-map-prefix ()
+  "Bind `sprite-mode-command-map' per `sprite-mode-map-prefix'."
+  (when sprite-mode-map-prefix
+    (keymap-set (symbol-value (cdr sprite-mode-map-prefix))
+                (car sprite-mode-map-prefix)
+                (cons "sprite" sprite-mode-command-map))))
+
+(defun sprite-mode--unbind-map-prefix ()
+  "Remove the binding installed by `sprite-mode--bind-map-prefix'."
+  (when sprite-mode-map-prefix
+    (keymap-unset (symbol-value (cdr sprite-mode-map-prefix))
+                  (car sprite-mode-map-prefix) t)))
+
 (defun sprite-mode--enable ()
   "Wire the sprite registry into `savehist' persistence and populate it.
 Registers `sprite--registry-saved' with `savehist-additional-variables' and
@@ -740,7 +768,8 @@ sprites already running to populate the in-memory registry immediately."
   (when (bound-and-true-p savehist-mode)
     (sprite--registry-deserialize)
     (sprite-defs-activate))
-  (sprite--discover-and-sync-registry))
+  (sprite--discover-and-sync-registry)
+  (sprite-mode--bind-map-prefix))
 
 (defun sprite-mode--disable ()
   "Undo `sprite-mode--enable': remove sprite's `savehist' hooks and variable."
@@ -749,13 +778,14 @@ sprites already running to populate the in-memory registry immediately."
   (remove-hook 'savehist-save-hook #'sprite--registry-serialize)
   (remove-hook 'savehist-mode-hook #'sprite--registry-deserialize)
   (remove-hook 'savehist-mode-hook #'sprite-defs-activate)
-  (remove-hook 'savehist-mode-hook #'sprite--discover-and-sync-registry))
+  (remove-hook 'savehist-mode-hook #'sprite--discover-and-sync-registry)
+  (sprite-mode--unbind-map-prefix))
 
 (defvar-keymap sprite-mode-map
-  "c" #'sprite-create
-  "l" #'sprite-list
-  "o" #'sprite-open-frame
-  "n" #'sprite-get-or-create-next)
+  :doc "Empty by design -- `sprite-mode' ships no default bindings of its
+own. See `sprite-mode-command-map' for commands, nested per
+`sprite-mode-map-prefix'; bind directly into this map for anything that
+should be active unconditionally whenever `sprite-mode' is on.")
 
 ;;;###autoload
 (define-minor-mode sprite-mode
@@ -763,7 +793,7 @@ sprites already running to populate the in-memory registry immediately."
 Enabling wires the registry into `savehist' persistence and scans the
 filesystem for already-running sprites to populate the registry;
 disabling removes the `savehist' hooks and variable registration.
-See `sprite-mode-map' for commands."
+See `sprite-mode-map' and `sprite-mode-command-map'."
   :global t
   :group 'sprite
   :keymap sprite-mode-map
