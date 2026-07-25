@@ -807,10 +807,10 @@
 
 (ert-deftest sprite/mode-map-binds-core-commands ()
   "sprite-mode-map binds the primary entry points to single keys."
-  (should (eq #'sprite-create (keymap-lookup sprite-mode-map "c")))
-  (should (eq #'sprite-list (keymap-lookup sprite-mode-map "l")))
-  (should (eq #'sprite-open-frame (keymap-lookup sprite-mode-map "o")))
-  (should (eq #'sprite-get-or-create-next (keymap-lookup sprite-mode-map "n"))))
+  (should (eq #'sprite-create (keymap-lookup sprite-mode-command-map "c")))
+  (should (eq #'sprite-list (keymap-lookup sprite-mode-command-map "l")))
+  (should (eq #'sprite-open-frame (keymap-lookup sprite-mode-command-map "o")))
+  (should (eq #'sprite-get-or-create-next (keymap-lookup sprite-mode-command-map "n"))))
 
 ;;;; sprite--provisional-p
 
