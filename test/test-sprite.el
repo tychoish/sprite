@@ -28,6 +28,11 @@
 (defvar argi)
 (defvar argv)
 
+;; Same reasoning for server-use-tcp/server-auth-dir, read dynamically by
+;; sprite--direct-target.
+(defvar server-use-tcp)
+(defvar server-auth-dir)
+
 (require 'sprite)
 (require 'sprite-list)
 
@@ -360,6 +365,87 @@
   (cl-letf (((symbol-function 'sprite--call) (lambda (&rest _) 1)))
     (should (null (sprite--call-and-read "work.0.render" 't)))))
 
+;;;; Communication: direct-backend target resolution
+
+(ert-deftest sprite/direct-target-unix-passthrough ()
+  "`sprite--direct-target' returns FULL-NAME unchanged when not using TCP."
+  (let ((server-use-tcp nil))
+    (should (equal "work.0.render" (sprite--direct-target "work.0.render")))))
+
+(ert-deftest sprite/direct-target-tcp-reads-server-file ()
+  "`sprite--direct-target' reads the TCP server file when `server-use-tcp' is set."
+  (let ((server-use-tcp t)
+        (server-auth-dir "/tmp/sprite-test-auth/"))
+    (cl-letf (((symbol-function 'sprite-direct-read-tcp-server-file)
+               (lambda (path)
+                 (should (equal "/tmp/sprite-test-auth/work.0.render" path))
+                 "127.0.0.1:1234:key")))
+      (should (equal "127.0.0.1:1234:key"
+                     (sprite--direct-target "work.0.render"))))))
+
+(ert-deftest sprite/direct-target-tcp-errors-when-no-server-file ()
+  "`sprite--direct-target' signals `user-error' when no TCP server file exists."
+  (let ((server-use-tcp t)
+        (server-auth-dir "/tmp/sprite-test-auth/"))
+    (cl-letf (((symbol-function 'sprite-direct-read-tcp-server-file) (lambda (_) nil)))
+      (should-error (sprite--direct-target "work.0.render") :type 'user-error))))
+
+;;;; Communication: backend dispatch
+
+(ert-deftest sprite/call-and-read-dispatches-to-emacsclient-by-default ()
+  "`sprite--call-and-read' uses the emacsclient backend when unconfigured."
+  (let ((sprite-communication-backend 'emacsclient)
+        called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (setq called t) 'ec-result))
+              ((symbol-function 'sprite--call-and-read-direct)
+               (lambda (&rest _) (error "should not be called"))))
+      (should (eq 'ec-result (sprite--call-and-read "work.0.render" '(+ 1 2))))
+      (should called))))
+
+(ert-deftest sprite/call-and-read-dispatches-to-direct-backend ()
+  "`sprite--call-and-read' uses the direct backend when so configured."
+  (let ((sprite-communication-backend 'direct)
+        called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-direct)
+               (lambda (&rest _) (setq called t) 'direct-result))
+              ((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (error "should not be called"))))
+      (should (eq 'direct-result (sprite--call-and-read "work.0.render" '(+ 1 2))))
+      (should called))))
+
+(ert-deftest sprite/call-and-read-direct-no-fallback-by-default ()
+  "`sprite--call-and-read' does not retry via emacsclient when fallback is disabled."
+  (let ((sprite-communication-backend 'direct)
+        (sprite-communication-fallback nil)
+        ec-called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-direct) (lambda (&rest _) nil))
+              ((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (setq ec-called t) 'ec-result)))
+      (should (null (sprite--call-and-read "work.0.render" '(+ 1 2))))
+      (should-not ec-called))))
+
+(ert-deftest sprite/call-and-read-direct-falls-back-when-enabled ()
+  "`sprite--call-and-read' retries via emacsclient when the direct call fails
+and `sprite-communication-fallback' is non-nil."
+  (let ((sprite-communication-backend 'direct)
+        (sprite-communication-fallback t))
+    (cl-letf (((symbol-function 'sprite--call-and-read-direct) (lambda (&rest _) nil))
+              ((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) 'ec-result)))
+      (should (eq 'ec-result (sprite--call-and-read "work.0.render" '(+ 1 2)))))))
+
+(ert-deftest sprite/call-and-read-direct-no-fallback-when-direct-succeeds ()
+  "`sprite--call-and-read' does not fall back when the direct call already succeeded."
+  (let ((sprite-communication-backend 'direct)
+        (sprite-communication-fallback t)
+        ec-called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-direct) (lambda (&rest _) 'direct-result))
+              ((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (setq ec-called t) 'ec-result)))
+      (should (eq 'direct-result (sprite--call-and-read "work.0.render" '(+ 1 2))))
+      (should-not ec-called))))
+
 (ert-deftest sprite/with-sprite-logs-and-returns-result ()
   "`with-sprite' (logged) logs sent/received and returns the result."
   (let (logged)
@@ -410,6 +496,19 @@
 
 (ert-deftest sprite/list-mode-derived-from-tabulated-list ()
   (should (get 'sprite-list-mode 'derived-mode-parent)))
+
+(ert-deftest sprite/list-info-shows-configured-backend ()
+  "`sprite-list-info' reports `sprite-communication-backend' in its detail buffer."
+  (let ((s (sprite--make :name "work.0.render" :idx 0
+                         :parent "work" :unique-name "render"))
+        (sprite-communication-backend 'direct))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+      (sprite-list-info)
+      (let ((buf (get-buffer "*Sprite Info: work.0.render*")))
+        (unwind-protect
+            (should (string-match-p "Backend:\\s-+direct"
+                                    (with-current-buffer buf (buffer-string))))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest sprite/build-list-entry-structure ()
   "build-list-entry returns (STRUCT VECTOR) with 7 columns: # Def Name Uptime Buffers Last-Seen Spawned-By."

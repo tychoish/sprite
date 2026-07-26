@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'map)
 (require 'sprite)
 (require 'sprite-heartbeat)
@@ -49,6 +50,34 @@
   "When the instance name is not a full sprite name, the instance itself is returned."
   (let ((sprite-instance-id "solo"))
     (should (equal "solo" (sprite-parent-socket-name)))))
+
+;;;; sprite-send — backend dispatch
+
+(ert-deftest sprite-heartbeat/send-uses-configured-backend ()
+  "`sprite-send' dispatches through `sprite--call-and-read', so it picks up
+`sprite-communication-backend' automatically -- no special-casing needed
+in sprite-heartbeat.el itself."
+  (let ((sprite-instance-id "primary.0.worker")
+        (sprite-communication-backend 'direct)
+        called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-direct)
+               (lambda (&rest _) (setq called t) 'the-result))
+              ((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (error "should not be called"))))
+      (should (eq 'the-result (sprite-send (+ 1 2))))
+      (should called))))
+
+(ert-deftest sprite-heartbeat/send-defaults-to-emacsclient-backend ()
+  "`sprite-send' uses the emacsclient backend when unconfigured."
+  (let ((sprite-instance-id "primary.0.worker")
+        (sprite-communication-backend 'emacsclient)
+        called)
+    (cl-letf (((symbol-function 'sprite--call-and-read-emacsclient)
+               (lambda (&rest _) (setq called t) 'the-result))
+              ((symbol-function 'sprite--call-and-read-direct)
+               (lambda (&rest _) (error "should not be called"))))
+      (should (eq 'the-result (sprite-send (+ 1 2))))
+      (should called))))
 
 ;;;; sprite-defhandler
 

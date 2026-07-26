@@ -45,8 +45,14 @@
 (require 'seq)
 (require 'subr-x)
 (require 'map)
+(require 'sprite-direct)
 
 (declare-function annotated-completing-read "annotated-completing-read")
+
+;; server.el variables; server.el is loaded by any running daemon but may be
+;; absent in batch/test contexts.
+(defvar server-use-tcp)
+(defvar server-auth-dir)
 
 ;;;; Instance identity and state paths
 
@@ -523,6 +529,34 @@ Each candidate is annotated with its index and uptime."
 
 ;;;; Communication
 
+(defcustom sprite-communication-backend 'emacsclient
+  "Transport used for sprite eval calls.
+`emacsclient' shells out to the emacsclient binary (default, matches
+current behaviour).  `direct' speaks the server wire protocol over a
+socket via sprite-direct.el, with no subprocess."
+  :type '(choice (const emacsclient) (const direct))
+  :group 'sprite)
+
+(defcustom sprite-communication-fallback nil
+  "When non-nil, retry with the other backend after a failed direct call.
+Only applies when `sprite-communication-backend' is `direct': a failed
+socket connection retries once via emacsclient before giving up."
+  :type 'boolean
+  :group 'sprite)
+
+(defun sprite--direct-target (full-name)
+  "Return the sprite-direct TARGET string for FULL-NAME.
+When the sprite runs with `server-use-tcp', reads its TCP server file
+via `sprite-direct-read-tcp-server-file'; otherwise FULL-NAME is already
+a valid Unix socket name.  `server-use-tcp' may be entirely unbound in
+batch/test contexts where server.el was never loaded; treated the same
+as nil."
+  (if (bound-and-true-p server-use-tcp)
+      (or (sprite-direct-read-tcp-server-file
+           (expand-file-name full-name server-auth-dir))
+          (user-error "sprite: no TCP server file for %s" full-name))
+    full-name))
+
 (defconst sprite--log-time-format "%H:%M:%S"
   "Format string for timestamps in sprite log buffers.")
 
@@ -548,7 +582,7 @@ Returns the emacsclient exit code."
   (call-process "emacsclient" nil buffer nil
                 "--socket-name" name "--eval" (format "%S" form)))
 
-(defun sprite--call-and-read (name form)
+(defun sprite--call-and-read-emacsclient (name form)
   "Invoke emacsclient against NAME evaluating FORM; return the read result.
 Returns the read Lisp value on success, nil if the call fails or output is
 unreadable.  Process errors propagate to the caller."
@@ -556,6 +590,21 @@ unreadable.  Process errors propagate to the caller."
     (when (= 0 (sprite--call name form (current-buffer)))
       (condition-case _ (read (buffer-string))
         (error nil)))))
+
+(defun sprite--call-and-read-direct (name form)
+  "Evaluate FORM in sprite NAME using the direct-socket backend."
+  (sprite-direct-call-and-read (sprite--direct-target name) form))
+
+(defun sprite--call-and-read (name form)
+  "Evaluate FORM in sprite NAME using `sprite-communication-backend'.
+Falls back to the emacsclient backend once when the direct backend
+fails and `sprite-communication-fallback' is non-nil."
+  (pcase sprite-communication-backend
+    ('direct
+     (or (sprite--call-and-read-direct name form)
+         (when sprite-communication-fallback
+           (sprite--call-and-read-emacsclient name form))))
+    (_ (sprite--call-and-read-emacsclient name form))))
 
 (cl-defmacro with-sprite (name form &key no-log)
   "Evaluate FORM in sprite NAME via emacsclient.
