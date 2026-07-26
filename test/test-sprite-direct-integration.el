@@ -245,6 +245,30 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
                     sprite-direct-test--eval-timeout)))
       (should (equal '(1 "two" three) result)))))
 
+(ert-deftest sprite-direct-proc/large-value-blocking ()
+  "A value bigger than `server-msg-size' (1024 bytes) round-trips correctly.
+Regression: server.el splits large `-print' values across a `-print'
+line plus one or more `-print-nonl' continuation lines; the client used
+to stop reading (and parse only the first chunk) as soon as any
+recognisable response line appeared, truncating anything long enough to
+need a continuation."
+  (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
+  (sprite-direct-test/with-fresh-daemon
+    (let* ((conn (sprite-direct-open sprite-direct-test--name))
+           (result (sprite-direct-eval-blocking
+                    conn '(make-string 2700 ?x) sprite-direct-test--eval-timeout)))
+      (should (equal (make-string 2700 ?x) result)))))
+
+(ert-deftest sprite-direct-proc/large-value-non-blocking ()
+  "A value bigger than `server-msg-size' round-trips via the non-blocking path."
+  (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
+  (sprite-direct-test/with-fresh-daemon
+    (let* ((conn (sprite-direct-open sprite-direct-test--name))
+           (promise (sprite-direct-eval-non-blocking conn '(make-string 2700 ?x)))
+           (result (sprite-direct-promise-wait promise sprite-direct-test--eval-timeout)))
+      (should (sprite-direct-promise-resolved-p promise))
+      (should (equal (make-string 2700 ?x) result)))))
+
 (ert-deftest sprite-direct-proc/eval-non-blocking-resolves ()
   "Non-blocking eval resolves to the correct value."
   (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
@@ -255,6 +279,35 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
       (let ((result (sprite-direct-promise-wait promise sprite-direct-test--eval-timeout)))
         (should (sprite-direct-promise-resolved-p promise))
         (should (= 42 result))))))
+
+(ert-deftest sprite-direct-proc/promise-then-runs-callback-on-resolve ()
+  "`sprite-direct-promise-then' calls back with (:resolved VALUE) without blocking."
+  (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
+  (sprite-direct-test/with-fresh-daemon
+    (let* ((conn (sprite-direct-open sprite-direct-test--name))
+           (promise (sprite-direct-eval-non-blocking conn '(* 6 7)))
+           (seen nil))
+      (sprite-direct-promise-then promise (lambda (state value) (setq seen (cons state value))))
+      (should (null seen))
+      (let ((deadline (+ (float-time) sprite-direct-test--eval-timeout)))
+        (while (and (null seen) (< (float-time) deadline))
+          (accept-process-output nil 0.1)))
+      (should (equal seen '(:resolved . 42))))))
+
+(ert-deftest sprite-direct-proc/promise-then-runs-callback-on-reject ()
+  "`sprite-direct-promise-then' calls back immediately when the promise
+was already rejected (no daemon reachable at the target), rather than
+only handling the pending-then-resolved case."
+  (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
+  (let* ((conn (sprite-direct-open "sprite-direct-test-nonexistent-target"))
+         (promise (sprite-direct-eval-non-blocking conn '(+ 1 1)))
+         (seen nil))
+    (should (sprite-direct-promise-rejected-p promise))
+    (sprite-direct-promise-then promise (lambda (state value) (setq seen (cons state value))))
+    (let ((deadline (+ (float-time) sprite-direct-test--eval-timeout)))
+      (while (and (null seen) (< (float-time) deadline))
+        (accept-process-output nil 0.1)))
+    (should (equal seen '(:rejected . nil)))))
 
 (ert-deftest sprite-direct-proc/call-and-read-compatibility ()
   "`sprite-direct-call-and-read' evaluates a form by target name."

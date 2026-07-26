@@ -225,10 +225,10 @@
   (should (= 42
              (sprite-direct--parse-response "-emacs-pid 12345\n-print 42\n"))))
 
-(ert-deftest sprite-direct/parse-response-prefers-first-print ()
-  "`sprite-direct--parse-response' returns the value from the first -print line."
-  (should (= 1
-             (sprite-direct--parse-response "-print 1\n-print 2\n"))))
+(ert-deftest sprite-direct/parse-response-reassembles-continuation-lines ()
+  "`sprite-direct--parse-response' concatenates a `-print' line with its
+`-print-nonl' continuation lines, in order, before reading."
+  (should (= 12 (sprite-direct--parse-response "-print 1\n-print-nonl 2\n"))))
 
 ;;;; Response-presence predicate
 

@@ -29,8 +29,8 @@
 ;; and closes it — the conn holds no persistent socket.
 ;;
 ;; Blocking receive uses generator.el: `sprite-direct--recv-gen' yields
-;; `:pending' while the response buffer is empty, allowing
-;; `accept-process-output' to run between polls.  Timeout behaviour is
+;; `:pending' until the connection closes, allowing `accept-process-output'
+;; to run between polls.  Timeout behaviour is
 ;; governed by `sprite-direct-blocking-timeout' and
 ;; `sprite-direct-yield-interval', both `defvar's for dynamic override.
 ;;
@@ -45,7 +45,9 @@
 ;;   `sprite-direct-eval-non-blocking'  — async eval returning a promise
 ;;   `sprite-direct-promise-pending-p'  — predicate: not yet resolved
 ;;   `sprite-direct-promise-resolved-p' — predicate: successfully resolved
+;;   `sprite-direct-promise-rejected-p' — predicate: failed
 ;;   `sprite-direct-promise-wait'       — block until promise resolves
+;;   `sprite-direct-promise-then'       — run a callback on resolution, no blocking
 ;;   `sprite-direct-list-buffers'       — list buffer names in the sprite
 ;;   `sprite-direct-insert-into-buffer' — insert text at a position
 ;;   `with-current-sprite-direct-buffer'— eval body in a remote buffer
@@ -197,23 +199,35 @@ than cookie files, so KEY may be nil for local connections."
 
 (defun sprite-direct--parse-response (raw)
   "Parse the RAW server response string; return the read Lisp value or nil.
-Searches for the first `-print VALUE' line and reads its decoded value.
-Returns nil for `-error' responses, nil or unterminated RAW, unreadable
-values, or when no recognised response line is found."
-  (when (and raw (string-match-p "\n" raw))
-    (catch 'done
+A value too large for one message arrives as an opening `-print LINE'
+followed by zero or more `-print-nonl LINE' continuation lines -- see
+`server-reply-print' in server.el, which splits at `server-msg-size'
+bytes and never marks which line is the last one; a real `emacsclient'
+session simply prints each as it arrives and relies on the connection
+closing to know the value is complete.  This reassembles every `-print'/
+`-print-nonl' line in RAW, in order, decoding and concatenating each
+segment before reading the result, so RAW must contain the *complete*
+response (wait for the connection to close first; see
+`sprite-direct--recv-gen' and `sprite-direct--promise-sentinel').
+Returns nil for `-error' responses, when RAW is nil or not yet
+newline-terminated (still streaming in), or when no recognised response
+line is found or the reassembled text is unreadable."
+  (when (and raw (string-suffix-p "\n" raw))
+    (let (chunks errored)
       (seq-do
        (lambda (line)
          (cond
-          ((string-match "^-print \\(.*\\)$" line)
-           (throw 'done
-                  (condition-case nil
-                      (read (sprite-direct--decode (match-string 1 line)))
-                    (error nil))))
+          ((string-match "\\`-print \\(.*\\)\\'" line)
+           (push (match-string 1 line) chunks))
+          ((string-match "\\`-print-nonl \\(.*\\)\\'" line)
+           (push (match-string 1 line) chunks))
           ((string-prefix-p "-error " line)
-           (throw 'done nil))))
+           (setq errored t))))
        (split-string raw "\n" t))
-      nil)))
+      (unless (or errored (null chunks))
+        (condition-case nil
+            (read (sprite-direct--decode (apply #'concat (nreverse chunks))))
+          (error nil))))))
 
 ;;;; Connection context
 
@@ -251,19 +265,28 @@ TARGET is evaluated once; the conn is created by `sprite-direct-open'."
 ;;;; Generator-based receive
 
 (defun sprite-direct--response-present-p (str)
-  "Return t when STR contains a recognisable server result line.
-Matches `-print' or `-error' at the start of a line.  The check is more
-specific than looking for any newline because the server sends
-`-emacs-pid PID\\n' immediately on connection open, before the eval result."
-  (string-match-p "\\(?:^\\|\n\\)-\\(?:print\\|error\\) " str))
+  "Return t when STR contains a complete, newline-terminated response line.
+Requires the closing newline, not just the `-print'/`-print-nonl'/
+`-error' prefix, since the prefix alone would match the instant a line
+*starts* arriving, before the rest of it (or a following continuation
+line) has streamed in.  Requiring the prefix over any bare newline is
+still necessary because the server sends `-emacs-pid PID\\n' immediately
+on connection open, before the eval result.  This only detects that *a*
+response line is present, not that the full (possibly multi-line) value
+has arrived -- see `sprite-direct--recv-gen', which waits for the
+connection to close instead of relying on this alone."
+  (string-match-p "\\(?:^\\|\n\\)-\\(?:print\\|print-nonl\\|error\\) .*\n" str))
 
 (iter-defun sprite-direct--recv-gen (proc)
-  "Generator that yields `:pending' until PROC's buffer has a result line.
-The final return value is the raw response string, or nil when PROC dies
-before a `-print' or `-error' line arrives."
-  (while (and (process-live-p proc)
-              (with-current-buffer (process-buffer proc)
-                (not (sprite-direct--response-present-p (buffer-string)))))
+  "Generator that yields `:pending' until PROC's connection closes.
+A value too large for one message arrives as multiple `-print'/
+`-print-nonl' lines with no marker on which one is last (see
+`sprite-direct--parse-response'), so -- like a real `emacsclient'
+session -- completion is signalled by the server closing the
+connection, not by any recognisable line appearing.  The final return
+value is the raw response string, or nil when PROC's buffer no longer
+exists once it does."
+  (while (process-live-p proc)
     (iter-yield :pending))
   (when-let* ((buf (process-buffer proc))
               ((buffer-live-p buf)))
@@ -401,6 +424,12 @@ If the connection cannot be opened, the promise is in :rejected state."
   "Return t when PROMISE resolved successfully."
   (eq :resolved (sprite-direct-promise-state promise)))
 
+(defun sprite-direct-promise-rejected-p (promise)
+  "Return t when PROMISE failed.
+Either the connection could not be opened, or it closed without ever
+producing a `-print'/`-error' response line."
+  (eq :rejected (sprite-direct-promise-state promise)))
+
 (defun sprite-direct-promise-wait (promise &optional timeout)
   "Block until PROMISE resolves; return its value or nil on timeout/rejection.
 Drives process output while waiting.  TIMEOUT overrides
@@ -413,6 +442,27 @@ Drives process output while waiting.  TIMEOUT overrides
                 (when proc (process-live-p proc)))
       (accept-process-output proc sprite-direct-async-check-interval nil t))
     (sprite-direct-promise-value promise)))
+
+(defun sprite-direct-promise-then (promise callback)
+  "Arrange for CALLBACK to run once PROMISE leaves its `:pending' state.
+Unlike `sprite-direct-promise-wait', this does not block: it polls PROMISE
+on a repeating timer (`sprite-direct-async-check-interval') and cancels
+itself the first time `sprite-direct-promise-pending-p' is nil, at which
+point it calls CALLBACK with two arguments, STATE (`:resolved' or
+`:rejected') and VALUE (`sprite-direct-promise-value', nil when rejected).
+The promise's own sentinel still does the actual work of receiving the
+result; this only supplies the missing \"notify me when done\" callback on
+top of the pending/resolved/rejected state it already exposes.  Returns
+the timer, so the caller can `cancel-timer' it to abandon the callback."
+  (letrec ((timer
+            (run-with-timer
+             0 sprite-direct-async-check-interval
+             (lambda ()
+               (unless (sprite-direct-promise-pending-p promise)
+                 (cancel-timer timer)
+                 (funcall callback (sprite-direct-promise-state promise)
+                          (sprite-direct-promise-value promise)))))))
+    timer))
 
 ;;;; Helper operations
 
