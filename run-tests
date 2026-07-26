@@ -1,0 +1,45 @@
+#!/usr/bin/env -S emacs --script
+
+;;; run-tests --- Run the sprite ERT test suite -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;;
+;; Standalone test runner: no external dependencies (Cask, ert-runner, or
+;; otherwise). Every real dependency (transient, seq, map, generator) ships
+;; with Emacs core; annotated-completing-read is optional and unexercised by
+;; the suite (see `sprite--annotated-or-plain-read').
+;;
+;; Loads every test/test-*.el file except test-sprite-direct-integration.el,
+;; which spawns real Emacs daemons and is meant to be run explicitly (see its
+;; own header comment), not as part of the routine suite. Each test file's
+;; own `require' forms resolve sprite.el/sprite-direct.el/etc. from this
+;; repo's root, added to `load-path' below.
+;;
+;; Usage:
+;;   ./run-tests
+;;   emacs --script run-tests
+
+;;; Code:
+
+(require 'seq)
+(require 'ert)
+
+(defconst sprite-test-runner--root
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory this script lives in -- the sprite package root.")
+
+(defconst sprite-test-runner--excluded-tests
+  '("test-sprite-direct-integration.el")
+  "Test files loaded on demand only, never as part of the routine suite.")
+
+(add-to-list 'load-path sprite-test-runner--root)
+
+(seq-do (lambda (file)
+          (unless (member (file-name-nondirectory file) sprite-test-runner--excluded-tests)
+            (load file nil t)))
+        (directory-files (file-name-concat sprite-test-runner--root "test")
+                          t "\\`test-.*\\.el\\'"))
+
+(ert-run-tests-batch-and-exit "^sprite")
+
+;;; run-tests ends here
