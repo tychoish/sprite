@@ -308,6 +308,34 @@
   (sprite-test/with-registry
     (should-error (sprite--resolve-name "unknown") :type 'user-error)))
 
+;;;; Optional annotated-completing-read dependency
+
+(ert-deftest sprite/annotated-or-plain-read-uses-annotated-when-available ()
+  "Uses `annotated-completing-read', passing CANDIDATES through, when fboundp."
+  (let (captured-candidates)
+    (cl-letf (((symbol-function 'annotated-completing-read)
+               (lambda (candidates &rest _keys) (setq captured-candidates candidates) "picked")))
+      (should (equal "picked"
+                     (sprite--annotated-or-plain-read "prompt: " '(("a" . "ann-a")))))
+      (should (equal '(("a" . "ann-a")) captured-candidates)))))
+
+(ert-deftest sprite/annotated-or-plain-read-falls-back-when-unavailable ()
+  "Falls back to plain `completing-read' over candidate names when
+`annotated-completing-read' is not fboundp -- simulating the optional
+dependency not being installed, by temporarily unbinding it rather than
+mocking `fboundp' itself (which would be called by unrelated code during
+the dynamic extent of the test)."
+  (let* ((was-bound (fboundp 'annotated-completing-read))
+         (saved (and was-bound (symbol-function 'annotated-completing-read))))
+    (unwind-protect
+        (progn
+          (fmakunbound 'annotated-completing-read)
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt collection &rest _rest) (car collection))))
+            (should (equal "a" (sprite--annotated-or-plain-read
+                                "prompt: " '(("a" . "ann-a") ("b" . "ann-b")))))))
+      (when was-bound (fset 'annotated-completing-read saved)))))
+
 ;;;; Communication
 
 (ert-deftest sprite/log-buffer-name-format ()

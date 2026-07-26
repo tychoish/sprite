@@ -484,10 +484,21 @@ Returns the new sprite struct."
                     full-name sprite-startup-timeout))
       s)))
 
+(defun sprite--annotated-or-plain-read (prompt candidates)
+  "Read a candidate string from CANDIDATES, an alist of (NAME . ANNOTATION).
+Uses `annotated-completing-read', showing each ANNOTATION, when that
+package is loaded; otherwise falls back to plain `completing-read' over
+the candidate names, since `annotated-completing-read' is an optional
+dependency."
+  (if (fboundp 'annotated-completing-read)
+      (annotated-completing-read candidates :prompt prompt :require-match t)
+    (completing-read prompt (seq-map #'car candidates) nil t)))
+
 (defun sprite--completing-read (prompt)
   "Read a sprite name from the registry using annotated completion.
 Each candidate is annotated with its index and uptime."
-  (annotated-completing-read
+  (sprite--annotated-or-plain-read
+   prompt
    (seq-map (lambda (s)
               (cons (sprite-name s)
                     (format "idx:%d uptime:%s"
@@ -495,9 +506,7 @@ Each candidate is annotated with its index and uptime."
                             (if (sprite-start-time s)
                                 (sprite--format-uptime (float-time (time-since (sprite-start-time s))))
                               "?"))))
-            (sprite--registry-all))
-   :prompt prompt
-   :require-match t))
+            (sprite--registry-all))))
 
 (defun sprite-stop (name)
   "Send (kill-emacs) to sprite NAME via emacsclient."
@@ -663,10 +672,12 @@ Returns \"?\" when SECONDS is nil."
 (defun sprite-open-frame (sprite)
   "Open a new Emacs frame connected to SPRITE.
 When called interactively, select from accessible sprites via
-`annotated-completing-read', annotated with status and uptime."
+`annotated-completing-read' (when available), annotated with status and
+uptime."
   (interactive
    (list (let* ((sprites (sprite-resolve-list))
-                (name (annotated-completing-read
+                (name (sprite--annotated-or-plain-read
+                       "sprite:"
                        (seq-map (lambda (s)
                                   (cons (sprite-name s)
                                         (format "%s  up:%s"
@@ -675,9 +686,7 @@ When called interactively, select from accessible sprites via
                                                  (when-let* ((st (sprite-start-time s)))
                                                    (floor (float-time
                                                            (time-since st))))))))
-                                sprites)
-                       :prompt "sprite:"
-                       :require-match t)))
+                                sprites))))
            (seq-find (lambda (s) (equal name (sprite-name s))) sprites))))
   (unless sprite
     (user-error "No sprite selected"))
