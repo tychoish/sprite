@@ -30,7 +30,8 @@ Cancels any timer created during BODY on exit."
   (declare (indent 0))
   `(let ((sprite-session-idle-hook nil)
          (sprite-session--idle-timer nil)
-         (sprite-session--logind-signal nil))
+         (sprite-session--logind-signal nil)
+         (sprite-session--dbus-signals nil))
      (unwind-protect
          (progn ,@body)
        (when (timerp sprite-session--idle-timer)
@@ -295,13 +296,47 @@ Cancels any timer created during BODY on exit."
 (ert-deftest sprite-session/stop-logind-watch-unregisters-signal ()
   "`sprite-session-stop-logind-watch' calls `dbus-unregister-object' with the stored signal."
   (sprite-session-test/with-clean-state
-    (let (received)
+    (let (unregistered)
       (setq sprite-session--logind-signal 'fake-signal)
       (cl-letf (((symbol-function 'dbus-unregister-object)
-                 (lambda (obj) (setq received obj))))
+                 (lambda (obj) (push obj unregistered))))
         (sprite-session-stop-logind-watch)
-        (should (eq 'fake-signal received))
-        (should (null sprite-session--logind-signal))))))
+        (should (member 'fake-signal unregistered))
+        (should (null sprite-session--logind-signal)))))
+
+(ert-deftest sprite-session/start-logind-watch-registers-all-signals ()
+  "On Linux, `sprite-session-start-logind-watch' registers all sleep and lock/screensaver signals."
+  (sprite-session-test/with-clean-state
+    (let ((register-calls nil)
+          (system-type 'gnu/linux)
+          (orig-fboundp (symbol-function 'fboundp)))
+      (cl-letf (((symbol-function 'fboundp)
+                 (lambda (sym)
+                   (if (eq sym 'dbus-register-signal) t (funcall orig-fboundp sym))))
+                ((symbol-function 'dbus-register-signal)
+                 (lambda (&rest args)
+                   (push args register-calls)
+                   (make-symbol (format "fake-signal-%d" (length register-calls))))))
+        (sprite-session-start-logind-watch)
+        (should (= 4 (length register-calls)))
+        (should sprite-session--logind-signal)
+        (should (= 3 (length sprite-session--dbus-signals)))
+        ;; Verify signal names registered
+        (let ((signals (seq-map (lambda (call) (nth 4 call)) (nreverse register-calls))))
+          (should (equal '("PrepareForSleep" "Lock" "Unlock" "ActiveChanged") signals)))))))
+
+(ert-deftest sprite-session/stop-logind-watch-unregisters-all-signals ()
+  "`sprite-session-stop-logind-watch' unregisters all registered DBus signal objects."
+  (sprite-session-test/with-clean-state
+    (let (unregistered)
+      (setq sprite-session--logind-signal 'fake-logind-sig)
+      (setq sprite-session--dbus-signals '(fake-sig-1 fake-sig-2 fake-sig-3))
+      (cl-letf (((symbol-function 'dbus-unregister-object)
+                 (lambda (obj) (push obj unregistered))))
+        (sprite-session-stop-logind-watch)
+        (should (equal '(fake-logind-sig fake-sig-1 fake-sig-2 fake-sig-3) (nreverse unregistered)))
+        (should (null sprite-session--logind-signal))
+        (should (null sprite-session--dbus-signals))))))
 
 (ert-deftest sprite-session/stop-logind-watch-noop-when-not-watching ()
   "`sprite-session-stop-logind-watch' does not error when signal var is nil."
