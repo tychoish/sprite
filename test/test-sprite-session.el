@@ -302,7 +302,7 @@ Cancels any timer created during BODY on exit."
                  (lambda (obj) (push obj unregistered))))
         (sprite-session-stop-logind-watch)
         (should (member 'fake-signal unregistered))
-        (should (null sprite-session--logind-signal)))))
+        (should (null sprite-session--logind-signal))))))
 
 (ert-deftest sprite-session/start-logind-watch-registers-all-signals ()
   "On Linux, `sprite-session-start-logind-watch' registers all sleep and lock/screensaver signals."
