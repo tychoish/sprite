@@ -1,4 +1,4 @@
-;;; test-sprite-direct-integration.el --- Integration tests for sprite-direct.el -*- lexical-binding: t -*-
+;;; test-sprite-direct-integration.el --- Integration tests for sprite-direct.el -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Batch run (requires a writable socket dir):
 ;;   emacs --batch -L ~/.emacs.d/external/sprite \

@@ -1,4 +1,4 @@
-;;; test-sprite-fleet.el --- ERT tests for sprite-fleet.el -*- lexical-binding: t -*-
+;;; test-sprite-fleet.el --- ERT tests for sprite-fleet.el -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Run inside a live Emacs session:
 ;;   (ert "^sprite-fleet/")

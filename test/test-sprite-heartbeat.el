@@ -1,4 +1,4 @@
-;;; test-sprite-heartbeat.el --- ERT tests for sprite-heartbeat.el -*- lexical-binding: t -*-
+;;; test-sprite-heartbeat.el --- ERT tests for sprite-heartbeat.el -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Run inside a live Emacs session:
 ;;   (ert "^sprite-heartbeat/")

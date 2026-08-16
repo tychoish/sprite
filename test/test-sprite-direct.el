@@ -1,4 +1,4 @@
-;;; test-sprite-direct.el --- ERT tests for sprite-direct.el -*- lexical-binding: t -*-
+;;; test-sprite-direct.el --- ERT tests for sprite-direct.el -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Run inside a live Emacs session:
 ;;   (ert "^sprite-direct/")
