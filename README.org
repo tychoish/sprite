@@ -2,7 +2,6 @@
 #+OPTIONS: toc:2 num:nil
 
 * Overview
-
 =sprite.el= manages "sprite" Emacs daemons that are subordinate to a
 parent Emacs instance.  Each sprite runs as a named =emacs --daemon=
 subprocess and is addressable via =emacsclient=.
@@ -303,11 +302,11 @@ Remove FN from ‘sprite-session-idle-hook’ and stop the timer if the hook is 
 
 *** sprite-session-start-logind-watch
 
-Register a DBus signal to run sleep/wake hooks on system transitions. Cancels any existing registration first to prevent duplicates.
+Register DBus signals to run sleep/wake/lock/screensaver hooks. Cancels any existing registrations first to prevent duplicates.
 
 *** sprite-session-stop-logind-watch
 
-Unregister the logind PrepareForSleep DBus signal.
+Unregister the logind PrepareForSleep DBus signal and other signals.
 
 *** sprite-resolve-instance-id
 
@@ -458,7 +457,6 @@ If called from Lisp, toggle the mode if ARG is ‘toggle’.  Enable the mode if
 To check whether the minor mode is enabled in the current buffer, evaluate ‘(default-value 'sprite-mode)’.
 
 The mode’s hook is called both when the mode is enabled and when it is disabled.
-
 
 * License
 Copyright (C) Sam Kleinman. GPL-3.0 or later. See the source file header
