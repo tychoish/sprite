@@ -121,6 +121,7 @@ only when running as root or under a symlinked `user-emacs-directory'."
                          user-login-name)))
      "-")))
 
+;;;autoload
 (defun sprite-state-path (name)
   "Return the full state-directory path for NAME, scoped to this host and instance."
   (file-name-concat
