@@ -127,16 +127,16 @@
 
 (ert-deftest sprite-future/wait-returns-immediately-when-already-resolved ()
   (let ((future (sprite-future--make :state :resolved :value 99)))
-    (should (= 99 (sprite-future-wait future 1)))))
+    (should (= 99 (sprite-future-wait future :timeout 1)))))
 
 (ert-deftest sprite-future/wait-returns-nil-when-already-rejected ()
   (let ((future (sprite-future--make :state :rejected :value nil)))
-    (should (null (sprite-future-wait future 1)))))
+    (should (null (sprite-future-wait future :timeout 1)))))
 
 (ert-deftest sprite-future/wait-times-out-when-still-pending ()
   "`sprite-future-wait' gives up and returns nil after TIMEOUT with no proc."
   (let ((future (sprite-future--make :state :pending :backend-handle nil)))
-    (should (null (sprite-future-wait future 0.05)))
+    (should (null (sprite-future-wait future :timeout 0.05)))
     (should (sprite-future-pending-p future))))
 
 ;;;; Backend dispatch: sprite-future-eval
@@ -257,14 +257,14 @@ without waiting on any promise."
   "A workflow with no `sprite-await' resolves immediately with its return value."
   (sprite-async-defun sprite-future-test--const-workflow ()
     42)
-  (should (= 42 (sprite-future-wait (sprite-future-test--const-workflow) 1))))
+  (should (= 42 (sprite-future-wait (sprite-future-test--const-workflow) :timeout 1))))
 
 (ert-deftest sprite-future/async-await-resumes-with-resolved-value ()
   "`sprite-await' resumes with the value of an already-resolved future."
   (sprite-async-defun sprite-future-test--await-workflow (f)
     (1+ (sprite-await f)))
   (let ((inner (sprite-future--make :state :resolved :value 9)))
-    (should (= 10 (sprite-future-wait (sprite-future-test--await-workflow inner) 1)))))
+    (should (= 10 (sprite-future-wait (sprite-future-test--await-workflow inner) :timeout 1)))))
 
 (ert-deftest sprite-future/async-await-multistep ()
   "Sequential `sprite-await' calls thread values through the workflow in order."
@@ -274,8 +274,7 @@ without waiting on any promise."
   (let ((fa (sprite-future--make :state :resolved :value 10))
         (fb (sprite-future--make :state :resolved :value 32)))
     (should (= 42 (sprite-future-wait
-                   (sprite-future-test--multistep-workflow fa fb) 1)))))
-
+                   (sprite-future-test--multistep-workflow fa fb) :timeout 1)))))
 (ert-deftest sprite-future/async-await-suspends-until-pending-future-settles ()
   "`sprite-await' on a still-pending future suspends the workflow without polling."
   (sprite-async-defun sprite-future-test--suspend-workflow (f)

@@ -120,7 +120,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   "`sprite-direct--await' returns nil when timeout is zero and gen is pending."
   (let ((gen (funcall (iter-lambda ()
                         (while t (iter-yield :pending))))))
-    (should-not (sprite-direct--await gen 0))))
+    (should-not (sprite-direct--await gen :timeout 0))))
 
 (ert-deftest sprite-direct-gen/await-respects-blocking-timeout ()
   "`sprite-direct-blocking-timeout' is used when timeout arg is nil."
@@ -135,7 +135,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
         (gen (funcall (iter-lambda ()
                         (while t (iter-yield :pending))))))
     ;; explicit 0 should timeout immediately despite blocking-timeout=999
-    (should-not (sprite-direct--await gen 0))))
+    (should-not (sprite-direct--await gen :timeout 0))))
 
 ;;;; Operation ID counter
 

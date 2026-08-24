@@ -290,14 +290,14 @@ A list of plists; populated by `sprite--registry-serialize'.")
 (defun sprite--decommissioned-p (full-name)
   "Return t if the DECOMMISSIONED marker file exists for FULL-NAME."
   (file-exists-p
-   (file-name-concat (sprite-state-directory full-name) "DECOMMISSIONED")))
+   (file-name-concat (sprite-state-directory :full-name full-name) "DECOMMISSIONED")))
 
 (defun sprite--write-decommissioned-file (full-name)
   "Write the DECOMMISSIONED marker file for FULL-NAME.  Returns t on success."
   (condition-case _
       (progn
         (write-region "" nil
-                      (file-name-concat (sprite-state-directory full-name)
+                      (file-name-concat (sprite-state-directory :full-name full-name)
                                         "DECOMMISSIONED"))
         t)
     (error nil)))
@@ -332,7 +332,7 @@ A list of plists; populated by `sprite--registry-serialize'.")
                     :idx idx
                     :parent parent
                     :unique-name unique-name
-                    :state-dir (sprite-state-directory full-name)))
+                    :state-dir (sprite-state-directory :full-name full-name)))
     (error "Cannot parse sprite name: %s" full-name)))
 
 (defun sprite--discover-and-sync-registry ()
@@ -434,7 +434,8 @@ Returns the read Lisp value on success, nil if the call fails or output is
 unreadable.  Process errors propagate to the caller."
   (with-temp-buffer
     (when (= 0 (sprite--call name form :buffer (current-buffer)))
-
+      (condition-case _ (read (buffer-string))
+        (error nil)))))
 (defun sprite--call-and-read-direct (name form)
   "Evaluate FORM in sprite NAME using the direct-socket backend."
   (sprite-direct-call-and-read (sprite--direct-target name) form))
@@ -497,7 +498,7 @@ Signals `user-error' if NAME cannot be resolved."
 (defun sprite--ensure-state-dir (full-name)
   "Create the state directory for FULL-NAME if it does not exist.
 Returns the state directory path."
-  (let ((dir (sprite-state-directory full-name)))
+  (let ((dir (sprite-state-directory :full-name full-name)))
     (make-directory dir t)
     dir))
 
@@ -562,6 +563,7 @@ Returns the new sprite struct."
                     full-name wait-timeout))
       s)))
 
+(defun sprite--annotated-or-plain-read (prompt candidates)
   "Read a candidate string from CANDIDATES, an alist of (NAME . ANNOTATION).
 Uses `annotated-completing-read', showing each ANNOTATION, when that
 package is loaded; otherwise falls back to plain `completing-read' over

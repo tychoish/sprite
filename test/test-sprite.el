@@ -372,7 +372,7 @@ the dynamic extent of the test)."
                (lambda (prog _in buf _disp &rest args)
                  (setq captured-args (cons prog args))
                  0)))
-      (sprite--call "work.0.render" '(+ 1 2) nil)
+      (sprite--call "work.0.render" '(+ 1 2))
       (should (equal "emacsclient" (car captured-args)))
       (should (member "--socket-name" captured-args))
       (should (member "work.0.render" captured-args))
@@ -382,9 +382,10 @@ the dynamic extent of the test)."
 (ert-deftest sprite/call-and-read-returns-result-on-success ()
   "`sprite--call-and-read' reads the result when sprite--call succeeds."
   (cl-letf (((symbol-function 'sprite--call)
-             (lambda (_name _form buf)
-               (when buf (with-current-buffer buf (insert "42")))
-               0)))
+             (cl-function
+              (lambda (_name _form &key buffer)
+                (when buffer (with-current-buffer buffer (insert "42")))
+                0))))
     (should (= 42 (sprite--call-and-read "work.0.render" '(+ 1 41))))))
 
 (ert-deftest sprite/call-and-read-returns-nil-on-failure ()
@@ -493,9 +494,10 @@ and `sprite-communication-fallback' is non-nil."
 (ert-deftest sprite/with-sprite-no-log-reads-result ()
   "`with-sprite' :no-log reads and returns the emacsclient output."
   (cl-letf (((symbol-function 'sprite--call)
-             (lambda (_name _form buf)
-               (when buf (with-current-buffer buf (insert "t")))
-               0)))
+             (cl-function
+              (lambda (_name _form &key buffer)
+                (when buffer (with-current-buffer buffer (insert "t")))
+                0))))
     (should (eq t (with-sprite "work.0.render" t :no-log t)))))
 
 ;;;; Overview buffer
