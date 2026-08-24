@@ -306,5 +306,13 @@ without waiting on any promise."
     (should (sprite-future-resolved-p outer))
     (should (equal '(:caught boom) (sprite-future-value outer)))))
 
+(ert-deftest sprite-future/async-defun-interactive-preserves-commandp ()
+  "sprite-async-defun preserves interactive declaration making commandp true."
+  (sprite-async-defun sprite-future-test--interactive-cmd (&optional _force)
+    "Interactive test command."
+    (interactive "P")
+    42)
+  (should (commandp 'sprite-future-test--interactive-cmd)))
+
 (provide 'test-sprite-future)
 ;;; test-sprite-future.el ends here

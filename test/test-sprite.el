@@ -53,10 +53,11 @@
   `(let ((tmpdir (make-temp-file "sprite-test-" t)))
      (unwind-protect
          (cl-letf (((symbol-function 'sprite-state-directory)
-                    (lambda (&optional full-name)
-                      (if full-name
-                          (file-name-concat tmpdir full-name)
-                        (file-name-as-directory tmpdir)))))
+                    (cl-function
+                     (lambda (&key full-name)
+                       (if full-name
+                           (file-name-concat tmpdir full-name)
+                         (file-name-as-directory tmpdir))))))
            ,@body)
        (delete-directory tmpdir t))))
 
@@ -240,12 +241,10 @@
       (should (member "work.0.render" found))
       (should (member "work.1.analysis" found))
       (should-not (member "not-a-sprite-name" found)))))
-
 (ert-deftest sprite/discover-state-dirs-empty-when-no-dir ()
   (cl-letf (((symbol-function 'sprite-state-directory)
-             (lambda (&optional _) "/nonexistent-sprite-state-dir/")))
+             (cl-function (lambda (&key full-name) "/nonexistent-sprite-state-dir/"))))
     (should (null (sprite--discover-state-dirs)))))
-
 (ert-deftest sprite/decommissioned-p-no-file ()
   (sprite-test/with-temp-state-dir
     (make-directory (file-name-concat (sprite-state-directory) "work.0.render"))

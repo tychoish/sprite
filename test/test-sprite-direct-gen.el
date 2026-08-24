@@ -246,7 +246,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   "`sprite-direct-list-buffers' evaluates the buffer-name form in the sprite."
   (sprite-direct-gen-test/with-mock-conn conn
     (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                (lambda (c form &optional _timeout)
+                (lambda (c form &rest _)
                   (and (eq c conn)
                        (equal '(mapcar #'buffer-name (buffer-list)) form)))))
       (sprite-direct-list-buffers conn))))
@@ -256,9 +256,9 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
-        (sprite-direct-insert-into-buffer conn "mybuf" "hello" nil))
+        (sprite-direct-insert-into-buffer conn "mybuf" "hello"))
       (should (equal 'with-current-buffer (car captured)))
       (should (equal "mybuf" (cadr captured)))
       ;; body is (progn (goto-char (point-max)) (insert "hello"))
@@ -271,9 +271,9 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
-        (sprite-direct-insert-into-buffer conn "mybuf" "hi" 10))
+        (sprite-direct-insert-into-buffer conn "mybuf" "hi" :position 10))
       (should (member 10 (flatten-list captured))))))
 
 (ert-deftest sprite-direct-gen/read-buffer-default-range ()
@@ -281,7 +281,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
         (sprite-direct-read-buffer conn "mybuf"))
       ;; body is (buffer-substring-no-properties (point-min) (point-max))
@@ -295,9 +295,9 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
-        (sprite-direct-read-buffer conn "mybuf" 5 50))
+        (sprite-direct-read-buffer conn "mybuf" :start 5 :end 50))
       (should (member 5 (flatten-list captured)))
       (should (member 50 (flatten-list captured))))))
 
@@ -306,7 +306,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
         (sprite-direct-value-of-symbol conn 'my-var))
       (should (equal '(symbol-value 'my-var) captured)))))
@@ -318,7 +318,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
         (with-current-sprite-direct-buffer (conn "test-buf")
           (insert "hello")
@@ -334,7 +334,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
     (let ((buf-name "dynamic-buf")
           captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
-                  (lambda (_c form &optional _t)
+                  (lambda (_c form &rest _)
                     (setq captured form))))
         (with-current-sprite-direct-buffer (conn buf-name)
           (point)))

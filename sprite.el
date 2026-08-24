@@ -40,8 +40,7 @@
 
 ;;; Code:
 
-(eval-when-compile
-  (require 'cl-lib))
+(require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 (require 'map)
@@ -186,18 +185,17 @@ Always returns a non-nil string: abbreviated for sprite instances,
 the raw instance id for top-level instances."
   (sprite--mode-line-id (sprite-instance-name)))
 
-(defun sprite-state-directory (&optional full-name)
+(cl-defun sprite-state-directory (&key full-name)
   "Return the state directory for sprite instance FULL-NAME, or the sprite root if nil."
   (let ((base (file-name-as-directory (sprite-state-path sprite--state-subdir))))
     (if full-name
         (file-name-concat base full-name)
       base)))
 
-(defun sprite-conf-state-path (name &optional full-name)
+(cl-defun sprite-conf-state-path (name &key full-name)
   "Return path for NAME within FULL-NAME's state directory.
 If FULL-NAME is nil, returns path under the sprite root."
-  (file-name-concat (sprite-state-directory full-name) name))
-
+  (file-name-concat (sprite-state-directory :full-name full-name) name))
 (defun sprite--live-p (s)
   "Return non-nil when S should appear in the overview list.
 Provisional (unspawned) definitions are always live.
@@ -403,6 +401,84 @@ For each provisional entry whose :parent matches `sprite-instance-name':
   (unless (seq-some #'sprite--provisional-p (sprite--registry-all))
     (sprite-session-remove-on-idle #'sprite-defs-activate-idle-check)))
 
+;;;; Communication and eval
+
+(defconst sprite--log-time-format "%H:%M:%S"
+  "Format string for timestamps in sprite log buffers.")
+
+(defun sprite--log-buffer-name (name)
+  "Return the name of the log buffer for sprite NAME."
+  (format "*sprite:%s*" name))
+
+(defun sprite--log (name direction content)
+  "Log a message to the sprite NAME log buffer.
+DIRECTION is the symbol `sent' or `received'.  CONTENT is a string."
+  (with-current-buffer (get-buffer-create (sprite--log-buffer-name name))
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert (propertize (format "%s" direction) 'face 'bold))
+      (insert (format " [%s]: %s\n"
+                      (format-time-string sprite--log-time-format)
+                      content)))))
+
+(cl-defun sprite--call (name form &key buffer)
+  "The single site where emacsclient is invoked for eval-based communication.
+Evaluates FORM in sprite NAME; captures output in BUFFER when non-nil.
+Returns the emacsclient exit code."
+  (call-process "emacsclient" nil buffer nil
+                "--socket-name" name "--eval" (format "%S" form)))
+
+(defun sprite--call-and-read-emacsclient (name form)
+  "Invoke emacsclient against NAME evaluating FORM; return the read result.
+Returns the read Lisp value on success, nil if the call fails or output is
+unreadable.  Process errors propagate to the caller."
+  (with-temp-buffer
+    (when (= 0 (sprite--call name form :buffer (current-buffer)))
+
+(defun sprite--call-and-read-direct (name form)
+  "Evaluate FORM in sprite NAME using the direct-socket backend."
+  (sprite-direct-call-and-read (sprite--direct-target name) form))
+
+(defun sprite--call-and-read (name form)
+  "Evaluate FORM in sprite NAME using `sprite-communication-backend'.
+Falls back to the emacsclient backend once when the direct backend
+fails and `sprite-communication-fallback' is non-nil."
+  (pcase sprite-communication-backend
+    ('direct
+     (or (sprite--call-and-read-direct name form)
+         (when sprite-communication-fallback
+           (sprite--call-and-read-emacsclient name form))))
+    (_ (sprite--call-and-read-emacsclient name form))))
+
+(cl-defmacro with-sprite (name form &key no-log)
+  "Evaluate FORM in sprite NAME via emacsclient.
+Returns the read result, or nil if the connection fails.
+Unless NO-LOG is non-nil, logs the exchange and updates last-contact."
+  (declare (indent 1))
+  (let ((gname (make-symbol "name"))
+        (gresult (make-symbol "result")))
+    `(let ((,gname ,name))
+       ,(unless no-log `(sprite--log ,gname 'sent (format "%S" ',form)))
+       (let ((,gresult
+              (condition-case ,(if no-log '_ 'err)
+                  (sprite--call-and-read ,gname ',form)
+                (error
+                 ,(unless no-log
+                    `(sprite--log ,gname 'error (error-message-string err)))
+                 nil))))
+         ,(unless no-log
+            `(when ,gresult
+               (sprite--log ,gname 'received (format "%S" ,gresult))
+               (when-let* ((s (sprite--registry-get ,gname)))
+                 (setf (sprite-last-contact s) (current-time)))))
+         ,gresult))))
+
+(defun sprite-open-log (name)
+  "Switch to the communication log buffer for sprite NAME."
+  (interactive (list (completing-read "Sprite log: "
+                                      (seq-map #'sprite-name (sprite--registry-all)))))
+  (pop-to-buffer (sprite--log-buffer-name name)))
+
 ;;;; Lifecycle
 
 (defun sprite--resolve-name (name)
@@ -452,7 +528,7 @@ matching PID first; falls back to an emacsclient ping."
         t)
       (not (null (with-sprite full-name t :no-log t)))))
 
-(defun sprite--wait-for-server (full-name &optional timeout-secs)
+(cl-defun sprite--wait-for-server (full-name &key timeout-secs)
   "Poll until sprite FULL-NAME's server is accepting connections.
 Times out after TIMEOUT-SECS seconds (default 10).  Returns t on success."
   (let ((deadline (time-add (current-time) (or timeout-secs 10)))
@@ -465,14 +541,15 @@ Times out after TIMEOUT-SECS seconds (default 10).  Returns t on success."
     ready))
 
 ;;;###autoload
-(defun sprite-create (unique-name)
+(cl-defun sprite-create (unique-name &key timeout)
   "Spawn a new sprite daemon with UNIQUE-NAME under the current instance.
 The current instance's ID becomes the parent.
 Returns the new sprite struct."
   (interactive "sSprite unique name: ")
   (let* ((parent (sprite-instance-name))
          (idx (sprite--next-idx parent))
-         (full-name (sprite--format-full-name parent idx unique-name)))
+         (full-name (sprite--format-full-name parent idx unique-name))
+         (wait-timeout (or timeout sprite-startup-timeout)))
     (when (sprite--decommissioned-p full-name)
       (user-error "Sprite %s is decommissioned and cannot be restarted" full-name))
     (sprite--ensure-state-dir full-name)
@@ -480,12 +557,11 @@ Returns the new sprite struct."
       (setf (sprite-spawned-by s)
             (buffer-name (current-buffer)))
       (sprite--registry-put s)
-      (unless (sprite--wait-for-server full-name sprite-startup-timeout)
+      (unless (sprite--wait-for-server full-name :timeout-secs wait-timeout)
         (user-error "Sprite %s did not become ready within %ds"
-                    full-name sprite-startup-timeout))
+                    full-name wait-timeout))
       s)))
 
-(defun sprite--annotated-or-plain-read (prompt candidates)
   "Read a candidate string from CANDIDATES, an alist of (NAME . ANNOTATION).
 Uses `annotated-completing-read', showing each ANNOTATION, when that
 package is loaded; otherwise falls back to plain `completing-read' over
@@ -567,84 +643,6 @@ as nil."
           (user-error "sprite: no TCP server file for %s" full-name))
     full-name))
 
-(defconst sprite--log-time-format "%H:%M:%S"
-  "Format string for timestamps in sprite log buffers.")
-
-(defun sprite--log-buffer-name (name)
-  "Return the name of the log buffer for sprite NAME."
-  (format "*sprite:%s*" name))
-
-(defun sprite--log (name direction content)
-  "Log a message to the sprite NAME log buffer.
-DIRECTION is the symbol `sent' or `received'.  CONTENT is a string."
-  (with-current-buffer (get-buffer-create (sprite--log-buffer-name name))
-    (let ((inhibit-read-only t))
-      (goto-char (point-max))
-      (insert (propertize (format "%s" direction) 'face 'bold))
-      (insert (format " [%s]: %s\n"
-                      (format-time-string sprite--log-time-format)
-                      content)))))
-
-(defun sprite--call (name form &optional buffer)
-  "The single site where emacsclient is invoked for eval-based communication.
-Evaluates FORM in sprite NAME; captures output in BUFFER when non-nil.
-Returns the emacsclient exit code."
-  (call-process "emacsclient" nil buffer nil
-                "--socket-name" name "--eval" (format "%S" form)))
-
-(defun sprite--call-and-read-emacsclient (name form)
-  "Invoke emacsclient against NAME evaluating FORM; return the read result.
-Returns the read Lisp value on success, nil if the call fails or output is
-unreadable.  Process errors propagate to the caller."
-  (with-temp-buffer
-    (when (= 0 (sprite--call name form (current-buffer)))
-      (condition-case _ (read (buffer-string))
-        (error nil)))))
-
-(defun sprite--call-and-read-direct (name form)
-  "Evaluate FORM in sprite NAME using the direct-socket backend."
-  (sprite-direct-call-and-read (sprite--direct-target name) form))
-
-(defun sprite--call-and-read (name form)
-  "Evaluate FORM in sprite NAME using `sprite-communication-backend'.
-Falls back to the emacsclient backend once when the direct backend
-fails and `sprite-communication-fallback' is non-nil."
-  (pcase sprite-communication-backend
-    ('direct
-     (or (sprite--call-and-read-direct name form)
-         (when sprite-communication-fallback
-           (sprite--call-and-read-emacsclient name form))))
-    (_ (sprite--call-and-read-emacsclient name form))))
-
-(cl-defmacro with-sprite (name form &key no-log)
-  "Evaluate FORM in sprite NAME via emacsclient.
-Returns the read result, or nil if the connection fails.
-Unless NO-LOG is non-nil, logs the exchange and updates last-contact."
-  (declare (indent 1))
-  (let ((gname (make-symbol "name"))
-        (gresult (make-symbol "result")))
-    `(let ((,gname ,name))
-       ,(unless no-log `(sprite--log ,gname 'sent (format "%S" ',form)))
-       (let ((,gresult
-              (condition-case ,(if no-log '_ 'err)
-                  (sprite--call-and-read ,gname ',form)
-                (error
-                 ,(unless no-log
-                    `(sprite--log ,gname 'error (error-message-string err)))
-                 nil))))
-         ,(unless no-log
-            `(when ,gresult
-               (sprite--log ,gname 'received (format "%S" ,gresult))
-               (when-let* ((s (sprite--registry-get ,gname)))
-                 (setf (sprite-last-contact s) (current-time)))))
-         ,gresult))))
-
-(defun sprite-open-log (name)
-  "Switch to the communication log buffer for sprite NAME."
-  (interactive (list (completing-read "Sprite log: "
-                                      (seq-map #'sprite-name (sprite--registry-all)))))
-  (pop-to-buffer (sprite--log-buffer-name name)))
-
 ;;;; Uptime formatting and remote frames
 ;;
 ;; The tabulated overview buffer (`sprite-list', `sprite-list-mode', etc.)
@@ -712,10 +710,11 @@ A sprite is \"active\" if it was contacted within this many seconds."
   :type 'integer
   :group 'sprite)
 
-(defcustom sprite-startup-timeout 10
+(defcustom sprite-startup-timeout 30
   "Seconds to wait for a newly spawned sprite server to accept connections."
   :type 'integer
   :group 'sprite)
+
 
 (defun sprite-worker-p ()
   "Return t if this instance is itself a sprite (has a parent)."
@@ -765,7 +764,7 @@ also includes sibling sprite from the same parent."
             (sprite-resolve-list)))
 
 ;;;###autoload
-(defun sprite-get-or-create-next ()
+(cl-defun sprite-get-or-create-next (&key timeout)
   "Return the next available sprite, creating one if none are free.
 Signals `user-error' if `sprite-max-count' would be exceeded."
   (or (sprite-get-next)
@@ -773,7 +772,7 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
         (if (>= active-count sprite-max-count)
             (user-error "All %d sprite are busy and max-count (%d) reached"
                         active-count sprite-max-count)
-          (sprite-create (format "worker-%d" active-count))))))
+          (sprite-create (format "worker-%d" active-count) :timeout timeout)))))
 
 ;;;; Global minor mode
 

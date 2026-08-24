@@ -25,20 +25,19 @@
 
 ;;; Code:
 
-(eval-when-compile
-  (require 'cl-lib))
+(require 'cl-lib)
 (require 'seq)
 (require 'sprite)
 (require 'sprite-future)
 
-(defun sprite-mapcar (form sprites &optional timeout)
+(cl-defun sprite-mapcar (form sprites &key timeout)
   "Evaluate FORM in each of SPRITES concurrently; return results in order.
 Mirrors `mapcar': one result per input, order preserved.  A sprite that
 times out or rejects contributes nil at its position.  SPRITES is a list
 of `sprite' structs, e.g. from `sprite-resolve-list'."
   (let ((futures (seq-map (lambda (s) (sprite-future-eval (sprite-name s) form))
                            sprites)))
-    (seq-map (lambda (f) (sprite-future-wait f timeout)) futures)))
+    (seq-map (lambda (f) (sprite-future-wait f :timeout timeout)) futures)))
 
 (defun sprite-mapc (form sprites)
   "Evaluate FORM in each of SPRITES concurrently; discard results.

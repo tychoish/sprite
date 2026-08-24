@@ -35,8 +35,7 @@
 
 ;;; Code:
 
-(eval-when-compile
-  (require 'cl-lib))
+(require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 (require 'generator)
@@ -134,7 +133,7 @@ Handles both backend shapes: a raw process (`emacsclient' backend) or a
      ((sprite-direct-promise-p handle) (sprite-direct-promise-proc handle))
      (t nil))))
 
-(defun sprite-future-wait (future &optional timeout)
+(cl-defun sprite-future-wait (future &key timeout)
   "Block until FUTURE settles; return its value or nil on timeout/rejection.
 Drives process output while waiting, mirroring `sprite-direct-promise-wait'.
 TIMEOUT overrides `sprite-direct-blocking-timeout'; nil waits indefinitely."
@@ -231,9 +230,13 @@ See `sprite-await', which unwraps this and re-signals its VALUE."
 Inside BODY, `sprite-await' suspends the generator until a future settles,
 without blocking the parent Emacs event loop.  Calling NAME returns
 immediately with a `sprite-future' for the workflow's overall result."
-  (declare (indent defun))
-  `(defun ,name ,arglist
-     (sprite--async-run (iter-make ,@body))))
+  (declare (indent defun) (doc-string 3))
+  (let ((doc (when (stringp (car body)) (pop body)))
+        (interactive-form (when (eq 'interactive (car-safe (car body))) (pop body))))
+    `(defun ,name ,arglist
+       ,@(when doc (list doc))
+       ,@(when interactive-form (list interactive-form))
+       (sprite--async-run (iter-make ,@body)))))
 
 (defmacro sprite-await (future)
   "Inside a `sprite-async-defun' body, suspend until FUTURE settles.

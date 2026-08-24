@@ -293,7 +293,7 @@ exists once it does."
     (with-current-buffer buf
       (buffer-string))))
 
-(defun sprite-direct--await (gen &optional timeout proc)
+(cl-defun sprite-direct--await (gen &key timeout proc)
   "Drive generator GEN to completion; return its final value.
 Calls `accept-process-output' on each `:pending' yield, targeting PROC
 when given (or any process when nil).  TIMEOUT overrides
@@ -316,7 +316,7 @@ Returns nil when the timeout expires before GEN produces a value."
 
 ;;;; Blocking evaluation
 
-(defun sprite-direct-eval-blocking (conn form &optional timeout)
+(cl-defun sprite-direct-eval-blocking (conn form &key timeout)
   "Evaluate FORM in the sprite via CONN; return the Lisp value.
 Opens a transient socket, sends the form, and blocks using the generator
 receive loop.  TIMEOUT overrides `sprite-direct-blocking-timeout'.
@@ -332,13 +332,13 @@ Returns nil on connection failure or server error."
           (progn
             (sprite-direct--send proc key form)
             (sprite-direct--parse-response
-             (sprite-direct--await (sprite-direct--recv-gen proc) timeout proc)))
+             (sprite-direct--await (sprite-direct--recv-gen proc) :timeout timeout :proc proc)))
         (when (process-live-p proc)
           (delete-process proc))
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
-(defun sprite-direct-call-and-read (target form &optional timeout)
+(cl-defun sprite-direct-call-and-read (target form &key timeout)
   "Evaluate FORM in the Emacs server at TARGET; return the read Lisp value.
 Drop-in replacement for `sprite--call-and-read' in sprite.el.
 TARGET is a Unix socket name or HOST:PORT:KEY TCP string.
@@ -346,7 +346,7 @@ TIMEOUT is passed to `sprite-direct-eval-blocking'.
 Returns nil on connection failure, missing auth key, or server error."
   (condition-case nil
       (with-sprite-direct (conn target)
-        (sprite-direct-eval-blocking conn form timeout))
+        (sprite-direct-eval-blocking conn form :timeout timeout))
     (user-error nil)))
 
 ;;;; Non-blocking evaluation (promise)
@@ -392,7 +392,7 @@ Returns nil on connection failure, missing auth key, or server error."
                     ((buffer-live-p buf)))
           (kill-buffer buf))))))
 
-(defun sprite-direct-eval-non-blocking (conn form &optional result-buffer)
+(cl-defun sprite-direct-eval-non-blocking (conn form &key result-buffer)
   "Evaluate FORM in CONN asynchronously; return a `sprite-direct-promise'.
 The promise resolves when the server closes the connection (via sentinel).
 RESULT-BUFFER is an optional buffer name; when the promise resolves, the
@@ -430,7 +430,7 @@ Either the connection could not be opened, or it closed without ever
 producing a `-print'/`-error' response line."
   (eq :rejected (sprite-direct-promise-state promise)))
 
-(defun sprite-direct-promise-wait (promise &optional timeout)
+(cl-defun sprite-direct-promise-wait (promise &key timeout)
   "Block until PROMISE resolves; return its value or nil on timeout/rejection.
 Drives process output while waiting.  TIMEOUT overrides
 `sprite-direct-blocking-timeout'; nil means wait indefinitely."
@@ -470,7 +470,7 @@ the timer, so the caller can `cancel-timer' it to abandon the callback."
   "Return a list of buffer names in the sprite via CONN."
   (sprite-direct-eval-blocking conn '(mapcar #'buffer-name (buffer-list))))
 
-(defun sprite-direct-insert-into-buffer (conn buf-name text &optional position)
+(cl-defun sprite-direct-insert-into-buffer (conn buf-name text &key position)
   "Insert TEXT into BUF-NAME in the sprite via CONN.
 When POSITION is non-nil, go there first; otherwise insert at `point-max'."
   (sprite-direct-eval-blocking
@@ -493,7 +493,7 @@ are not in scope.  The result of the last BODY form is returned."
         ,gconn
         (append (list 'with-current-buffer ,gbuf) ',body)))))
 
-(defun sprite-direct-read-buffer (conn buf-name &optional start end)
+(cl-defun sprite-direct-read-buffer (conn buf-name &key start end)
   "Return the contents of BUF-NAME in the sprite via CONN.
 START and END are buffer positions (defaults: `point-min' and `point-max').
 Returns a string, or nil on failure."
