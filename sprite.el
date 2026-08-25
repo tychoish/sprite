@@ -66,7 +66,7 @@
 Set by `sprite-set-up-instance-name' at startup.")
 
 (defvar sprite--system-name-cached nil
-  "Cached value of the output of `system-name' for use in system management contexts")
+  "Cached value of the output of `funcion:system-name' for use in system management contexts.")
 
 (defvar sprite-cli-instance-id nil
   "CLI-specified instance name; set from --id command-line arguments.")
@@ -293,7 +293,7 @@ A list of plists; populated by `sprite--registry-serialize'.")
    (file-name-concat (sprite-state-directory :full-name full-name) "DECOMMISSIONED")))
 
 (defun sprite--write-decommissioned-file (full-name)
-  "Write the DECOMMISSIONED marker file for FULL-NAME.  Returns t on success."
+  "Write the DECOMMISSIONED marker file for FULL-NAME, returning t on success."
   (condition-case _
       (progn
         (write-region "" nil
@@ -484,8 +484,8 @@ Unless NO-LOG is non-nil, logs the exchange and updates last-contact."
 
 (defun sprite--resolve-name (name)
   "Resolve NAME to a full sprite name.
-NAME may be a full name (returned as-is) or a unique-name matched in the registry.
-Signals `user-error' if NAME cannot be resolved."
+NAME may be a full name (returned as-is) or a unique-name matched in the
+registry.  Signals `user-error' if NAME cannot be resolved."
   (cond
    ((sprite--registry-get name) name)
    (t
@@ -545,7 +545,9 @@ Times out after TIMEOUT-SECS seconds (default 10).  Returns t on success."
 (cl-defun sprite-create (unique-name &key timeout)
   "Spawn a new sprite daemon with UNIQUE-NAME under the current instance.
 The current instance's ID becomes the parent.
-Returns the new sprite struct."
+Returns the new sprite struct.
+
+Times out after TIMEOUT seconds."
   (interactive "sSprite unique name: ")
   (let* ((parent (sprite-instance-name))
          (idx (sprite--next-idx parent))
@@ -568,14 +570,14 @@ Returns the new sprite struct."
 Uses `annotated-completing-read', showing each ANNOTATION, when that
 package is loaded; otherwise falls back to plain `completing-read' over
 the candidate names, since `annotated-completing-read' is an optional
-dependency."
+dependency.  Specify the text of the PROMPT."
   (if (fboundp 'annotated-completing-read)
       (annotated-completing-read candidates :prompt prompt :require-match t)
     (completing-read prompt (seq-map #'car candidates) nil t)))
 
 (defun sprite--completing-read (prompt)
   "Read a sprite name from the registry using annotated completion.
-Each candidate is annotated with its index and uptime."
+Each candidate is annotated with its index and uptime.  Specify the text of the PROMPT."
   (sprite--annotated-or-plain-read
    prompt
    (seq-map (lambda (s)
@@ -642,7 +644,7 @@ as nil."
   (if (bound-and-true-p server-use-tcp)
       (or (sprite-direct-read-tcp-server-file
            (expand-file-name full-name server-auth-dir))
-          (user-error "sprite: no TCP server file for %s" full-name))
+          (user-error "No TCP server file for %s" full-name))
     full-name))
 
 ;;;; Uptime formatting and remote frames
@@ -768,7 +770,8 @@ also includes sibling sprite from the same parent."
 ;;;###autoload
 (cl-defun sprite-get-or-create-next (&key timeout)
   "Return the next available sprite, creating one if none are free.
-Signals `user-error' if `sprite-max-count' would be exceeded."
+Times out after TIMEOUT seconds.  Signals `user-error' if
+`sprite-max-count' would be exceeded."
   (or (sprite-get-next)
       (let ((active-count (length (sprite-resolve-list))))
         (if (>= active-count sprite-max-count)
@@ -787,10 +790,10 @@ Signals `user-error' if `sprite-max-count' would be exceeded."
   "n" #'sprite-get-or-create-next)
 
 (defcustom sprite-mode-map-prefix nil
-  "Cons of (KEY . KEYMAP-SYMBOL) controlling where
-`sprite-mode-command-map' is bound as a nested prefix keymap. Applied
-when `sprite-mode' is enabled and removed when it is disabled. Set to
-nil to skip binding it into any parent keymap."
+  "Cons storing `sprite-mode-command-map' is bound as a nested prefix keymap.
+
+Applied when `sprite-mode' is enabled and removed when it is
+disabled.  Set to nil to skip binding it into any parent keymap."
   :type '(choice (const :tag "Do not bind" nil)
                  (cons (string :tag "Key") (symbol :tag "Keymap")))
   :group 'sprite)
