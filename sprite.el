@@ -758,26 +758,54 @@ also includes sibling sprite from the same parent."
       (> (float-time (time-since (sprite-last-contact s)))
          sprite-active-threshold)))
 
-;;;###autoload
-(defun sprite-get-next ()
-  "Return the struct of the next available sprite, or nil.
-\"Available\" means running and not recently contacted."
-  (seq-find (lambda (s)
-              (and (sprite--running-p (sprite-name s))
-                   (sprite--available-p s)))
-            (sprite-resolve-list)))
+(defun sprite--usable-p (s)
+  "Return non-nil if sprite struct S is running and available."
+  (and (sprite--running-p (sprite-name s))
+       (sprite--available-p s)))
 
-;;;###autoload
-(cl-defun sprite-get-or-create-next (&key timeout)
-  "Return the next available sprite, creating one if none are free.
-Times out after TIMEOUT seconds.  Signals `user-error' if
-`sprite-max-count' would be exceeded."
-  (or (sprite-get-next)
-      (let ((active-count (length (sprite-resolve-list))))
-        (if (>= active-count sprite-max-count)
-            (user-error "All %d sprite are busy and max-count (%d) reached"
-                        active-count sprite-max-count)
-          (sprite-create (format "worker-%d" active-count) :timeout timeout)))))
+(defun sprite--target-name (s)
+  "Return target name string for sprite S (struct or string)."
+  (if (stringp s) s (sprite-name s)))
+
+ ;;;###autoload
+ (defun sprite-get-next ()
+   "Return the struct of the next available sprite, or nil.
+ \"Available\" means running and not recently contacted."
+   (seq-find #'sprite--usable-p (sprite-resolve-list)))
+
+ ;;;###autoload
+ (cl-defun sprite-get-or-create-next (&key timeout)
+   "Return the next available sprite, creating one if none are free.
+ Times out after TIMEOUT seconds.  Signals `user-error' if
+ `sprite-max-count' would be exceeded."
+   (or (sprite-get-next)
+       (let ((active-count (length (sprite-resolve-list))))
+         (if (>= active-count sprite-max-count)
+             (user-error "All %d sprite are busy and max-count (%d) reached"
+                         active-count sprite-max-count)
+           (sprite-create (format "worker-%d" active-count) :timeout timeout)))))
+
+ ;;;###autoload
+ (cl-defun sprite-get-or-create-fleet (count &key timeout)
+   "Return a list of up to COUNT available or newly created sprite structs.
+ Reuses available sprites first, spawning new ones up to `sprite-max-count'
+ or COUNT."
+   (let* ((available (seq-take (seq-filter #'sprite--usable-p (sprite-resolve-list)) count))
+          (needed (- count (length available)))
+          (active-count (length (sprite-resolve-list)))
+          (created-list nil)
+          (created nil))
+     (while (and (> needed 0) (< active-count sprite-max-count))
+       (setq created (ignore-errors
+                       (sprite-create (format "worker-%d" active-count) :timeout timeout)))
+       (if created
+           (progn
+             (push created created-list)
+             (cl-decf needed)
+             (cl-incf active-count))
+         (setq needed 0)))
+     (nconc available (nreverse created-list))))
+
 
 ;;;; Global minor mode
 

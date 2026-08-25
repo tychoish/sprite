@@ -771,6 +771,19 @@ and `sprite-communication-fallback' is non-nil."
                                             :last-contact (current-time)))
         (should-error (sprite-get-or-create-next) :type 'user-error)))))
 
+(ert-deftest sprite/get-or-create-fleet-returns-sprites ()
+  (sprite-test/with-registry
+    (let ((sprite-max-count 4))
+      (cl-letf (((symbol-function 'sprite--running-p) (lambda (_) t))
+                ((symbol-function 'sprite--decommissioned-p) (lambda (_) nil))
+                ((symbol-function 'sprite-create)
+                 (lambda (name &rest _)
+                   (let ((s (sprite--make :name (format "solo.0.%s" name) :idx 0 :parent "solo")))
+                     (sprite--registry-put s)
+                     s))))
+        (let ((fleet (sprite-get-or-create-fleet 2)))
+          (should (= 2 (length fleet))))))))
+
 (ert-deftest sprite/resolve-list-includes-children-for-controller ()
   (sprite-test/with-registry
     (cl-letf (((symbol-function 'sprite--decommissioned-p) (lambda (_) nil)))

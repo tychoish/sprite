@@ -19,9 +19,10 @@
 ;; not the sum of every call.
 ;;
 ;; Entry points:
-;;   `sprite-mapcar' — collect, ordered (mirrors `mapcar')
-;;   `sprite-mapc'   — fire-and-forget (mirrors `mapc')
-;;   `sprite-let'    — parallel destructuring bind (mirrors `let')
+;;   `sprite-mapcar'       — collect, ordered (mirrors `mapcar')
+;;   `sprite-mapc'         — fire-and-forget (mirrors `mapc')
+;;   `sprite-fleet-mapcar' — map over items using a fleet of sprites
+;;   `sprite-let'          — parallel destructuring bind (mirrors `let')
 
 ;;; Code:
 
@@ -30,13 +31,24 @@
 (require 'sprite)
 (require 'sprite-future)
 
+(defun sprite-fleet--make-item-form (fn-or-form item)
+  "Construct expression to evaluate FN-OR-FORM for ITEM."
+  (cond
+   ((and (symbolp fn-or-form) (fboundp fn-or-form))
+    `(,fn-or-form ',item))
+   ((and (consp fn-or-form) (eq (car fn-or-form) 'lambda))
+    `(funcall ',fn-or-form ',item))
+   ((consp fn-or-form)
+    `(let ((item ',item) (_ ',item)) ,fn-or-form))
+   (t `(funcall ,fn-or-form ',item))))
+
 (cl-defun sprite-mapcar (form sprites &key timeout)
   "Evaluate FORM in each of SPRITES concurrently; return results in order.
 Mirrors `mapcar': one result per input, order preserved.  A sprite that
 times out or rejects contributes nil at its position.  SPRITES is a list
 of `sprite' structs, e.g. from `sprite-resolve-list'."
-  (let ((futures (seq-map (lambda (s) (sprite-future-eval (sprite-name s) form))
-                           sprites)))
+  (let ((futures (seq-map (lambda (s) (sprite-future-eval (sprite--target-name s) form))
+                          sprites)))
     (seq-map (lambda (f) (sprite-future-wait f :timeout timeout)) futures)))
 
 (defun sprite-mapc (form sprites)
@@ -44,8 +56,68 @@ of `sprite' structs, e.g. from `sprite-resolve-list'."
 Mirrors `mapc': dispatches to every sprite and returns SPRITES immediately
 without waiting for any of them to settle.  SPRITES is a list of `sprite'
 structs, e.g. from `sprite-resolve-list'."
-  (seq-do (lambda (s) (sprite-future-eval (sprite-name s) form)) sprites)
+  (seq-do (lambda (s) (sprite-future-eval (sprite--target-name s) form)) sprites)
   sprites)
+
+;;;###autoload
+(cl-defun sprite-fleet-mapcar (fn-or-form items &key fleet-size sprites timeout async)
+  "Evaluate FN-OR-FORM for each item in ITEMS using a fleet of sprites.
+FN-OR-FORM can be a unary function/lambda symbol or a form to evaluate.
+When FN-OR-FORM is a function symbol or lambda, each item is passed as an arg.
+When FN-OR-FORM is a form containing `item' or `_', that form is evaluated
+remotely with the item bound.
+
+FLEET-SIZE is the maximum number of concurrent sprites to use (defaults to
+`sprite-max-count' or the length of ITEMS).
+
+SPRITES is an optional list of sprite structs or target name strings to use
+as the worker fleet.  When omitted, sprites are obtained via
+`sprite-get-or-create-fleet'.
+
+TIMEOUT is passed to `sprite-future-wait' when operating synchronously.
+
+If ASYNC is non-nil, returns a `sprite-future' immediately that resolves
+to the ordered list of results when all items complete.  Otherwise, blocks
+and returns the ordered list of results."
+  (let* ((item-list (if (vectorp items) (append items nil) (copy-sequence items)))
+         (num-items (length item-list))
+         (overall-future (sprite-future--make :target "fleet" :state :pending)))
+    (cond
+     ((null item-list)
+      (sprite-future--settle overall-future :resolved nil))
+     (t
+      (let* ((effective-size (or fleet-size (min num-items sprite-max-count)))
+             (worker-sprites (or sprites (sprite-get-or-create-fleet effective-size)))
+             (target-names (seq-map #'sprite--target-name worker-sprites)))
+        (if (null target-names)
+            (sprite-future--settle overall-future :rejected "No available sprites")
+          (let ((results (make-vector num-items nil))
+                (remaining (seq-map-indexed (lambda (item idx) (cons idx item)) item-list))
+                (active-count 0))
+            (cl-labels
+                ((dispatch-next (target-name)
+                   (if (null remaining)
+                       (progn
+                         (cl-decf active-count)
+                         (when (<= active-count 0)
+                           (sprite-future--settle overall-future :resolved (append results nil))))
+                     (let* ((cell (pop remaining))
+                            (idx (car cell))
+                            (item (cdr cell))
+                            (form (sprite-fleet--make-item-form fn-or-form item))
+                            (future (sprite-future-eval target-name form))
+                            (finish (lambda (val)
+                                      (aset results idx val)
+                                      (dispatch-next target-name))))
+                       (sprite-future-then future finish (lambda (_) (funcall finish nil)))))))
+              (let ((initial-workers (seq-take target-names (min num-items (length target-names)))))
+                (setq active-count (length initial-workers))
+                (dolist (target initial-workers)
+                  (dispatch-next target)))))))))
+    (if async
+        overall-future
+      (sprite-future-wait overall-future :timeout timeout))))
+
 
 (cl-defmacro sprite-let (bindings &rest body)
   "Like `let', but each binding's value comes from a concurrent sprite eval.

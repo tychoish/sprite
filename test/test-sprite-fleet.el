@@ -137,5 +137,47 @@
                                 (b "s2" 32))
                      (cons a b))))))
 
+;;;; sprite-fleet-mapcar
+
+(ert-deftest sprite-fleet/fleet-mapcar-empty-returns-nil ()
+  "`sprite-fleet-mapcar' with empty items returns nil."
+  (should (null (sprite-fleet-mapcar #'identity nil))))
+
+(ert-deftest sprite-fleet/fleet-mapcar-dispatches-items-over-fleet ()
+  "`sprite-fleet-mapcar' dispatches items over given sprites and returns ordered results."
+  (let ((dispatches nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (push (cons target form) dispatches)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (sprite-future--settle f :resolved (cadr (cadr form)))
+                   f))))
+      (let ((res (sprite-fleet-mapcar '1+ '(10 20 30) :sprites '("worker-0" "worker-1"))))
+        (should (equal '(10 20 30) res))
+        (should (= 3 (length dispatches)))))))
+
+(ert-deftest sprite-fleet/fleet-mapcar-async-returns-future ()
+  "`sprite-fleet-mapcar' with :async t returns a resolved sprite-future."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending)))
+                 (sprite-future--settle f :resolved (concat "done-" (cadr (cadr form))))
+                 f))))
+    (let ((future (sprite-fleet-mapcar 'identity '("a" "b") :sprites '("w0") :async t)))
+      (should (sprite-future-p future))
+      (should (sprite-future-resolved-p future))
+      (should (equal '("done-a" "done-b") (sprite-future-value future))))))
+
+(ert-deftest sprite-fleet/fleet-mapcar-item-form-eval ()
+  "`sprite-fleet-mapcar' evaluates forms with `item' or `_'."
+  (let ((dispatches nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (push (cons target form) dispatches)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (sprite-future--settle f :resolved (eval form))
+                   f))))
+      (let ((res (sprite-fleet-mapcar '(+ item 1) '(5 15) :sprites '("w0"))))
+        (should (equal '(6 16) res))))))
 (provide 'test-sprite-fleet)
 ;;; test-sprite-fleet.el ends here
