@@ -190,20 +190,18 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
   "`sprite-direct--promise-sentinel' sets state to :resolved on finished."
   (let* ((buf (generate-new-buffer " *sdg-test*"))
          (promise (sprite-direct--promise-make :state :pending :proc nil))
-         (proc (start-process "sdg-sentinel-test" buf "true")))
+         (proc (start-process "sdg-sentinel-test" buf "sleep" "1")))
+    (set-process-query-on-exit-flag proc nil)
     (unwind-protect
         (progn
           (with-current-buffer buf
             (insert "-print 99\n"))
           (process-put proc 'sprite-direct-promise promise)
-          (set-process-sentinel proc #'sprite-direct--promise-sentinel)
-          (while (process-live-p proc)
-            (accept-process-output proc 0.1))
-          (accept-process-output nil 0.1)
+          (sprite-direct--promise-sentinel proc "finished\n")
           (should (sprite-direct-promise-resolved-p promise))
           (should (= 99 (sprite-direct-promise-value promise))))
+      (when (process-live-p proc) (delete-process proc))
       (when (buffer-live-p buf) (kill-buffer buf)))))
-
 (ert-deftest sprite-direct-gen/promise-sentinel-resolves-to-result-buffer ()
   "`sprite-direct--promise-sentinel' appends the value to result-buffer."
   (let* ((result-buf (generate-new-buffer " *sdg-result-test*"))
@@ -211,20 +209,19 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
          (promise (sprite-direct--promise-make
                    :state :pending
                    :result-buffer (buffer-name result-buf)))
-         (fake-proc (start-process "sdg-result-test" proc-buf "true")))
+         (fake-proc (start-process "sdg-result-test" proc-buf "sleep" "1")))
+    (set-process-query-on-exit-flag fake-proc nil)
     (unwind-protect
         (progn
           (with-current-buffer proc-buf
             (insert "-print (1&_2&_3)\n"))
           (process-put fake-proc 'sprite-direct-promise promise)
-          (set-process-sentinel fake-proc #'sprite-direct--promise-sentinel)
-          (while (process-live-p fake-proc)
-            (accept-process-output fake-proc 0.1))
-          (accept-process-output nil 0.1)
+          (sprite-direct--promise-sentinel fake-proc "finished\n")
           (should (sprite-direct-promise-resolved-p promise))
           (should (equal '(1 2 3) (sprite-direct-promise-value promise)))
           (with-current-buffer result-buf
             (should (string-match-p "(1 2 3)" (buffer-string)))))
+      (when (process-live-p fake-proc) (delete-process fake-proc))
       (when (buffer-live-p result-buf) (kill-buffer result-buf))
       (when (buffer-live-p proc-buf) (kill-buffer proc-buf)))))
 

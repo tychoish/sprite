@@ -32,11 +32,14 @@
 ;; `:pending' until the connection closes, allowing `accept-process-output'
 ;; to run between polls.  Timeout behaviour is
 ;; governed by `sprite-direct-blocking-timeout' and
-;; `sprite-direct-yield-interval', both `defvar's for dynamic override.
-;;
-;; Non-blocking evaluation returns a `sprite-direct-promise' that resolves
-;; via a process sentinel when the server closes the connection.
-;;
+;;; Code:
+
+(require 'cl-lib)
+(require 'generator)
+(require 'map)
+(require 'seq)
+(require 'subr-x)
+
 ;; Entry points:
 ;;   `with-sprite-direct'               — open a connection context
 ;;   `sprite-direct-open'               — open a conn imperatively
@@ -438,8 +441,7 @@ Drives process output while waiting.  TIMEOUT overrides
          (limit (or timeout sprite-direct-blocking-timeout))
          (deadline (when limit (+ (float-time) limit))))
     (while (and (sprite-direct-promise-pending-p promise)
-                (or (null deadline) (< (float-time) deadline))
-                (when proc (process-live-p proc)))
+                (or (null deadline) (< (float-time) deadline)))
       (accept-process-output proc sprite-direct-async-check-interval nil t))
     (sprite-direct-promise-value promise)))
 

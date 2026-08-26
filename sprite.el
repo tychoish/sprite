@@ -1,8 +1,9 @@
-;;; sprite.el --- Manage subordinate Emacs daemon instances -*- lexical-binding: t; -*-
+;;; sprite.el --- Orchestrate daemon instances and async programming model -*- lexical-binding: t; -*-
 
 ;; Author: Sam Kleinman
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (seq "2.24"))
+;; URL: https://github.com/tychoish/sprite
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
@@ -637,14 +638,13 @@ socket connection retries once via emacsclient before giving up."
 (defun sprite--direct-target (full-name)
   "Return the sprite-direct TARGET string for FULL-NAME.
 When the sprite runs with `server-use-tcp', reads its TCP server file
-via `sprite-direct-read-tcp-server-file'; otherwise FULL-NAME is already
-a valid Unix socket name.  `server-use-tcp' may be entirely unbound in
-batch/test contexts where server.el was never loaded; treated the same
-as nil."
-  (if (bound-and-true-p server-use-tcp)
+via `sprite-direct-read-tcp-server-file' if present; otherwise returns
+FULL-NAME as a Unix socket name."
+  (if (and (bound-and-true-p server-use-tcp)
+           (bound-and-true-p server-auth-dir))
       (or (sprite-direct-read-tcp-server-file
            (expand-file-name full-name server-auth-dir))
-          (user-error "No TCP server file for %s" full-name))
+          full-name)
     full-name))
 
 ;;;; Uptime formatting and remote frames
@@ -809,7 +809,7 @@ also includes sibling sprite from the same parent."
 
 ;;;; Global minor mode
 
-(defvar savehist-additional-variables nil)
+(defvar savehist-additional-variables)
 
 (defvar-keymap sprite-mode-command-map
   "c" #'sprite-create

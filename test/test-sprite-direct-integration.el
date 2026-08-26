@@ -213,7 +213,7 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
   (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
   (sprite-direct-test/with-fresh-daemon
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
-           (result (sprite-direct-eval-blocking conn 't sprite-direct-test--eval-timeout)))
+           (result (sprite-direct-eval-blocking conn 't :timeout sprite-direct-test--eval-timeout)))
       (should (eq t result)))))
 
 (ert-deftest sprite-direct-proc/arithmetic-eval ()
@@ -222,7 +222,7 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
   (sprite-direct-test/with-fresh-daemon
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (result (sprite-direct-eval-blocking
-                    conn '(+ 1 2 3 4) sprite-direct-test--eval-timeout)))
+                    conn '(+ 1 2 3 4) :timeout sprite-direct-test--eval-timeout)))
       (should (= 10 result)))))
 
 (ert-deftest sprite-direct-proc/string-eval ()
@@ -232,7 +232,7 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (result (sprite-direct-eval-blocking
                     conn '(concat "hello" " " "world")
-                    sprite-direct-test--eval-timeout)))
+                    :timeout sprite-direct-test--eval-timeout)))
       (should (equal "hello world" result)))))
 
 (ert-deftest sprite-direct-proc/list-eval ()
@@ -242,7 +242,7 @@ so this test accepts either: a readable auth file in `server-auth-dir' or
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (result (sprite-direct-eval-blocking
                     conn '(list 1 "two" 'three)
-                    sprite-direct-test--eval-timeout)))
+                    :timeout sprite-direct-test--eval-timeout)))
       (should (equal '(1 "two" three) result)))))
 
 (ert-deftest sprite-direct-proc/large-value-blocking ()
@@ -256,16 +256,15 @@ need a continuation."
   (sprite-direct-test/with-fresh-daemon
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (result (sprite-direct-eval-blocking
-                    conn '(make-string 2700 ?x) sprite-direct-test--eval-timeout)))
+                    conn '(make-string 2700 ?x) :timeout sprite-direct-test--eval-timeout)))
       (should (equal (make-string 2700 ?x) result)))))
-
 (ert-deftest sprite-direct-proc/large-value-non-blocking ()
   "A value bigger than `server-msg-size' round-trips via the non-blocking path."
   (skip-unless (and (boundp 'server-socket-dir) server-socket-dir))
   (sprite-direct-test/with-fresh-daemon
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (promise (sprite-direct-eval-non-blocking conn '(make-string 2700 ?x)))
-           (result (sprite-direct-promise-wait promise sprite-direct-test--eval-timeout)))
+           (result (sprite-direct-promise-wait promise :timeout sprite-direct-test--eval-timeout)))
       (should (sprite-direct-promise-resolved-p promise))
       (should (equal (make-string 2700 ?x) result)))))
 
@@ -276,7 +275,7 @@ need a continuation."
     (let* ((conn (sprite-direct-open sprite-direct-test--name))
            (promise (sprite-direct-eval-non-blocking conn '(* 6 7))))
       (should (sprite-direct-promise-pending-p promise))
-      (let ((result (sprite-direct-promise-wait promise sprite-direct-test--eval-timeout)))
+      (let ((result (sprite-direct-promise-wait promise :timeout sprite-direct-test--eval-timeout)))
         (should (sprite-direct-promise-resolved-p promise))
         (should (= 42 result))))))
 
@@ -334,7 +333,10 @@ only handling the pending-then-resolved case."
               (let ((sprite-direct-blocking-timeout 2.0))
                 (sprite-direct-call-and-read sprite-direct-test--name '(kill-emacs 0)))
             (error nil))
-          (sleep-for 1.0)
+          (let ((deadline (+ (float-time) 3.0)))
+            (while (and (file-exists-p (sprite-direct--socket-path sprite-direct-test--name))
+                        (< (float-time) deadline))
+              (sleep-for 0.1)))
           (should-not (file-exists-p
                        (sprite-direct--socket-path sprite-direct-test--name))))
       (when (process-live-p proc) (delete-process proc))
@@ -351,13 +353,13 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (should (sprite-direct-eval-blocking
                      conn `(buffer-live-p (get-buffer ,buf))
-                     sprite-direct-test--eval-timeout)))
+                     :timeout sprite-direct-test--eval-timeout)))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/insert-and-read-full ()
   "`sprite-direct-insert-into-buffer' and `sprite-direct-read-buffer' round-trip."
@@ -366,13 +368,13 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "hello, world")
             (should (equal "hello, world"
                            (sprite-direct-read-buffer conn buf))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/insert-appends-at-end ()
   "Multiple inserts without position accumulate at the end of the buffer."
@@ -381,14 +383,14 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "foo")
             (sprite-direct-insert-into-buffer conn buf "bar")
             (should (equal "foobar"
                            (sprite-direct-read-buffer conn buf))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/insert-at-position ()
   "Inserting at a given position puts text at the right point."
@@ -397,14 +399,14 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "ac")
-            (sprite-direct-insert-into-buffer conn buf "b" 2)
+            (sprite-direct-insert-into-buffer conn buf "b" :position 2)
             (should (equal "abc"
                            (sprite-direct-read-buffer conn buf))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/read-buffer-range ()
   "`sprite-direct-read-buffer' with explicit start/end returns the sub-range."
@@ -413,13 +415,13 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "abcdef")
             (should (equal "bcd"
-                           (sprite-direct-read-buffer conn buf 2 5))))
+                           (sprite-direct-read-buffer conn buf :start 2 :end 5))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/buffer-local-variable ()
   "A buffer-local variable set via `with-current-sprite-direct-buffer' is readable."
@@ -428,7 +430,7 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (with-current-sprite-direct-buffer (conn buf)
               (set (make-local-variable 'sprite-direct-test-local-var) 99))
             (let ((val (with-current-sprite-direct-buffer (conn buf)
@@ -436,7 +438,7 @@ only handling the pending-then-resolved case."
               (should (= 99 val))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/with-current-buffer-macro-result ()
   "`with-current-sprite-direct-buffer' returns the value of the last form."
@@ -445,20 +447,20 @@ only handling the pending-then-resolved case."
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
-                                         sprite-direct-test--eval-timeout)
+                                         :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "hello")
             (let ((result (with-current-sprite-direct-buffer (conn buf)
                             (point-max))))
               (should (= 6 result))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
                                              (kill-buffer ,buf))
-                                     sprite-direct-test--eval-timeout)))))
+                                     :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/value-of-symbol ()
   "`sprite-direct-value-of-symbol' reads a global symbol from the daemon."
   (sprite-direct-test/with-daemon conn
     (sprite-direct-eval-blocking conn '(setq sprite-direct-test-global-sym 123)
-                                 sprite-direct-test--eval-timeout)
+                                 :timeout sprite-direct-test--eval-timeout)
     (should (= 123 (sprite-direct-value-of-symbol conn 'sprite-direct-test-global-sym)))))
 
 (ert-deftest sprite-direct-buf/non-blocking-result-buffer ()
@@ -469,8 +471,8 @@ only handling the pending-then-resolved case."
           (progn
             (let ((promise (sprite-direct-eval-non-blocking
                             conn '(+ 100 200)
-                            (buffer-name result-buf))))
-              (sprite-direct-promise-wait promise sprite-direct-test--eval-timeout)
+                            :result-buffer (buffer-name result-buf))))
+              (sprite-direct-promise-wait promise :timeout sprite-direct-test--eval-timeout)
               (should (sprite-direct-promise-resolved-p promise))
               (should (= 300 (sprite-direct-promise-value promise)))
               (with-current-buffer result-buf

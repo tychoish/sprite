@@ -411,12 +411,12 @@ the dynamic extent of the test)."
       (should (equal "127.0.0.1:1234:key"
                      (sprite--direct-target "work.0.render"))))))
 
-(ert-deftest sprite/direct-target-tcp-errors-when-no-server-file ()
-  "`sprite--direct-target' signals `user-error' when no TCP server file exists."
+(ert-deftest sprite/direct-target-tcp-falls-back-when-no-server-file ()
+  "`sprite--direct-target' falls back to FULL-NAME when no TCP server file exists."
   (let ((server-use-tcp t)
         (server-auth-dir "/tmp/sprite-test-auth/"))
     (cl-letf (((symbol-function 'sprite-direct-read-tcp-server-file) (lambda (_) nil)))
-      (should-error (sprite--direct-target "work.0.render") :type 'user-error))))
+      (should (equal "work.0.render" (sprite--direct-target "work.0.render"))))))
 
 ;;;; Communication: backend dispatch
 
