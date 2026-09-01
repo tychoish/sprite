@@ -1,5 +1,10 @@
-;;; sprite-session.el --- Generic session lifecycle hooks for Emacs instances -*- lexical-binding: t; -*-
+;;; sprite-session.el --- Generic session lifecycle hooks -*- lexical-binding: t; -*-
 
+;; Author: Sam Kleinman
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1"))
+;; URL: https://github.com/tychoish/sprite
+;; Keywords: tools, daemon, processes
 ;;; Commentary:
 ;; Idle timer and systemd-logind sleep hooks that application packages can
 ;; register against.  Decouples trigger mechanisms (Emacs idleness, system
@@ -78,7 +83,7 @@ Logs the deregistration and delegates to `sprite-session-sync-idle-timer'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; systemd-logind PrepareForSleep hook
+;; systemd-logind hook
 
 (defvar sprite-session-before-sleep-hook nil
   "Hook run before the system suspends or hibernates.

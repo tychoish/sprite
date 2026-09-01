@@ -3,6 +3,7 @@
 ;; Author: Sam Kleinman
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (seq "2.24") (transient "0.4"))
+;; URL: https://github.com/tychoish/sprite
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
@@ -37,17 +38,17 @@
 
 (declare-function annotated-completing-read "annotated-completing-read")
 
-(defun sprite--query-buffer-count (full-name)
+(defun sprite-list--query-buffer-count (full-name)
   "Try to get the buffer count from sprite FULL-NAME.  Returns integer or nil."
   (when-let* ((n (with-sprite full-name (length (buffer-list)) :no-log t))
               ((numberp n)))
     n))
 
-(defun sprite--for-current-parent-p (s)
+(defun sprite-list--for-current-parent-p (s)
   "Return t if sprite S belongs to the current parent instance."
   (equal (sprite-parent s) (sprite-instance-name)))
 
-(defun sprite--build-list-entry (s)
+(defun sprite-list--build-list-entry (s)
   "Build a `tabulated-list' entry for sprite struct S."
   (let* ((provisional (sprite--provisional-p s))
          (name (sprite-name s))
@@ -55,7 +56,7 @@
                    (float-time (time-since (sprite-start-time s)))))
          (last-seen (when (sprite-last-contact s)
                       (float-time (time-since (sprite-last-contact s)))))
-         (buffers (if provisional "—" (or (sprite--query-buffer-count name) "?")))
+         (buffers (if provisional "—" (or (sprite-list--query-buffer-count name) "?")))
          (spawned-by (or (sprite-spawned-by s) "")))
     (list s
           (vector
@@ -72,7 +73,7 @@
            (sprite--format-uptime last-seen)
            spawned-by))))
 
-(defun sprite--build-parent-entry ()
+(defun sprite-list--build-parent-entry ()
   "Build a `tabulated-list' entry representing the current parent instance."
   (let* ((name (sprite-instance-name))
          (uptime (when (boundp 'before-init-time)
@@ -91,7 +92,7 @@
            "(self)"
            "system"))))
 
-(defconst sprite--list-buffer-name "*sprite-list*"
+(defconst sprite-list--buffer-name "*sprite-list*"
   "Name of the sprite overview buffer.")
 
 (defvar sprite-list-mode-map
@@ -132,20 +133,22 @@
   (interactive)
   (sprite--discover-and-sync-registry)
   (setq tabulated-list-entries
-        (cons (sprite--build-parent-entry)
+        (cons (sprite-list--build-parent-entry)
               (thread-last (sprite--registry-all)
                 (seq-filter (lambda (s)
-                              (and (sprite--for-current-parent-p s)
+                              (and (sprite-list--for-current-parent-p s)
                                    (sprite--live-p s))))
-                (seq-map #'sprite--build-list-entry))))
+                (seq-map #'sprite-list--build-list-entry))))
   (tabulated-list-print t))
 
-(defvar sprite-info-map (make-sparse-keymap)
-  "Keymap for sprite info help buffers.  Inherits `help-mode-map' once loaded.
-Add context-specific bindings here.")
+(require 'help-mode)
 
-(with-eval-after-load 'help-mode
-  (set-keymap-parent sprite-info-map help-mode-map))
+(defvar sprite-list-info-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map help-mode-map)
+    map)
+  "Keymap for sprite info help buffers.
+Add context-specific bindings here.")
 
 (defun sprite-list-info ()
   "Show a help-window detail buffer for the sprite at point."
@@ -174,13 +177,13 @@ Add context-specific bindings here.")
       (princ (format "  Backend:      %s\n" sprite-communication-backend)))
     (when-let* ((buf (get-buffer buf-name)))
       (with-current-buffer buf
-        (use-local-map sprite-info-map)))))
+        (use-local-map sprite-list-info-map)))))
 
 ;;;###autoload
 (defun sprite-list ()
   "Open the sprite overview buffer."
   (interactive)
-  (with-current-buffer (get-buffer-create sprite--list-buffer-name)
+  (with-current-buffer (get-buffer-create sprite-list--buffer-name)
     (unless (derived-mode-p 'sprite-list-mode)
       (sprite-list-mode))
     (sprite-list-refresh)

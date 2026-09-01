@@ -98,13 +98,19 @@ Bind VAR to a connection context for TARGET and evaluate BODY. Each operation in
 
 *** sprite-direct-eval-blocking
 
+: (fn CONN FORM &key TIMEOUT)
+
 Evaluate FORM in the sprite via CONN; return the Lisp value. Opens a transient socket, sends the form, and blocks using the generator receive loop.  TIMEOUT overrides ‘sprite-direct-blocking-timeout’. Returns nil on connection failure or server error.
 
 *** sprite-direct-call-and-read
 
+: (fn TARGET FORM &key TIMEOUT)
+
 Evaluate FORM in the Emacs server at TARGET; return the read Lisp value. Drop-in replacement for ‘sprite--call-and-read’ in sprite.el. TARGET is a Unix socket name or HOST:PORT:KEY TCP string. TIMEOUT is passed to ‘sprite-direct-eval-blocking’. Returns nil on connection failure, missing auth key, or server error.
 
 *** sprite-direct-eval-non-blocking
+
+: (fn CONN FORM &key RESULT-BUFFER)
 
 Evaluate FORM in CONN asynchronously; return a ‘sprite-direct-promise’. The promise resolves when the server closes the connection (via sentinel). RESULT-BUFFER is an optional buffer name; when the promise resolves, the result is appended to it as a ‘prin1’ line.  Returns the promise immediately. If the connection cannot be opened, the promise is in :rejected state.
 
@@ -122,6 +128,8 @@ Return t when PROMISE failed. Either the connection could not be opened, or it c
 
 *** sprite-direct-promise-wait
 
+: (fn PROMISE &key TIMEOUT)
+
 Block until PROMISE resolves; return its value or nil on timeout/rejection. Drives process output while waiting.  TIMEOUT overrides ‘sprite-direct-blocking-timeout’; nil means wait indefinitely.
 
 *** sprite-direct-promise-then
@@ -134,15 +142,17 @@ Return a list of buffer names in the sprite via CONN.
 
 *** sprite-direct-insert-into-buffer
 
+: (fn CONN BUF-NAME TEXT &key POSITION)
+
 Insert TEXT into BUF-NAME in the sprite via CONN. When POSITION is non-nil, go there first; otherwise insert at ‘point-max’.
 
-*** with-current-sprite-direct-buffer
+*** TODO sprite-direct-with-current-buffer
 
-: (fn (CONN BUF-NAME) &rest BODY)
-
-Evaluate BODY forms in the sprite via CONN with BUF-NAME current. BODY is literal Emacs Lisp sent verbatim to the sprite; local variables are not in scope.  The result of the last BODY form is returned.
+*no docstring*
 
 *** sprite-direct-read-buffer
+
+: (fn CONN BUF-NAME &key START END)
 
 Return the contents of BUF-NAME in the sprite via CONN. START and END are buffer positions (defaults: ‘point-min’ and ‘point-max’). Returns a string, or nil on failure.
 
@@ -154,19 +164,31 @@ Return the value of SYMBOL in the sprite via CONN. Evaluates ‘(symbol-value 'S
 
 Read the TCP server file at PATH; return its HOST:PORT:KEY string. Returns nil when PATH is absent or unreadable.
 
-*** sprite-mapcar
+*** TODO sprite-fleet-mapcar-sprites
 
-Evaluate FORM in each of SPRITES concurrently; return results in order. Mirrors ‘mapcar’: one result per input, order preserved.  A sprite that times out or rejects contributes nil at its position.  SPRITES is a list of ‘sprite’ structs, e.g. from ‘sprite-resolve-list’.
+*no docstring*
 
-*** sprite-mapc
+*** TODO sprite-fleet-mapc
 
-Evaluate FORM in each of SPRITES concurrently; discard results. Mirrors ‘mapc’: dispatches to every sprite and returns SPRITES immediately without waiting for any of them to settle.  SPRITES is a list of ‘sprite’ structs, e.g. from ‘sprite-resolve-list’.
+*no docstring*
 
-*** sprite-let
+*** sprite-fleet-mapcar
 
-: (fn BINDINGS &rest BODY)
+: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES TIMEOUT ASYNC)
 
-Like ‘let’, but each binding’s value comes from a concurrent sprite eval. Each element of BINDINGS is (VAR SPRITE FORM): SPRITE is an expression evaluated to a sprite full-name string, FORM is unquoted and evaluated remotely (quoted automatically, as with ‘with-sprite’).  All FORMs are dispatched in parallel; BODY runs once every binding has settled, with VAR bound to its resolved value.
+Evaluate FN-OR-FORM for each item in ITEMS using a fleet of sprites. FN-OR-FORM can be a unary function/lambda symbol or a form to evaluate. When FN-OR-FORM is a function symbol or lambda, each item is passed as an arg. When FN-OR-FORM is a form containing ‘item’ or ‘_’, that form is evaluated remotely with the item bound.
+
+FLEET-SIZE is the maximum number of concurrent sprites to use (defaults to ‘sprite-max-count’ or the length of ITEMS).
+
+SPRITES is an optional list of sprite structs or target name strings to use as the worker fleet.  When omitted, sprites are obtained via ‘sprite-get-or-create-fleet’.
+
+TIMEOUT is passed to ‘sprite-future-wait’ when operating synchronously.
+
+If ASYNC is non-nil, returns a ‘sprite-future’ immediately that resolves to the ordered list of results when all items complete.  Otherwise, blocks and returns the ordered list of results.
+
+*** TODO sprite-fleet-let
+
+*no docstring*
 
 *** sprite-future-pending-p
 
@@ -186,6 +208,8 @@ Chain ON-RESOLVE (and optionally ON-REJECT) onto FUTURE. Returns a new ‘sprite
 
 *** sprite-future-wait
 
+: (fn FUTURE &key TIMEOUT)
+
 Block until FUTURE settles; return its value or nil on timeout/rejection. Drives process output while waiting, mirroring ‘sprite-direct-promise-wait’. TIMEOUT overrides ‘sprite-direct-blocking-timeout’; nil waits indefinitely.
 
 *** sprite-future-eval
@@ -196,29 +220,25 @@ Evaluate FORM in sprite TARGET asynchronously; return a ‘sprite-future’. Dis
 
 *no docstring*
 
-*** sprite-async-defun
+*** TODO sprite-future-async-defun
 
-: (fn NAME ARGLIST &rest BODY)
+*no docstring*
 
-Define NAME as an async sprite workflow. Inside BODY, ‘sprite-await’ suspends the generator until a future settles, without blocking the parent Emacs event loop.  Calling NAME returns immediately with a ‘sprite-future’ for the workflow’s overall result.
+*** TODO sprite-future-await
 
-*** sprite-await
+*no docstring*
 
-Inside a ‘sprite-async-defun’ body, suspend until FUTURE settles. Resumes with FUTURE’s resolved value when it resolves.  When FUTURE rejects, signals ‘sprite-future-rejected’ with the rejection value at this point, so a ‘condition-case’ wrapping ‘sprite-await’ can catch it.
+*** TODO sprite-heartbeat-defhandler
 
-*** sprite-defhandler
+*no docstring*
 
-Define a function NAME callable by sprites. ARGS must begin with a symbol that receives the calling sprite’s full name; ‘last-contact’ is updated for that sprite before BODY runs.
+*** TODO sprite-heartbeat-parent-socket-name
 
-Example: (sprite-defhandler handle-status (caller status) (message "%s reported: %s" caller status))
+*no docstring*
 
-*** sprite-parent-socket-name
+*** TODO sprite-heartbeat-send
 
-Return the socket name of this sprite’s parent instance. Derived from the leading component of ‘sprite-instance-name’. Falls back to the instance name itself when called on the root instance.
-
-*** sprite-send
-
-Evaluate FORM in the parent instance, tagging this sprite as the sender. The parent records a heartbeat for this sprite before evaluating FORM. Returns the result of FORM as read from the parent.
+*no docstring*
 
 *** sprite-list-mode :command:
 
@@ -338,9 +358,13 @@ Parse --id=NAME or --id NAME from ‘command-line-functions’ context. Sets ‘
 
 *** sprite-state-directory
 
+: (fn &key FULL-NAME)
+
 Return the state directory for sprite instance FULL-NAME, or the sprite root if nil.
 
 *** sprite-conf-state-path
+
+: (fn NAME &key FULL-NAME)
 
 Return path for NAME within FULL-NAME’s state directory. If FULL-NAME is nil, returns path under the sprite root.
 
@@ -358,9 +382,23 @@ Reconcile declared definitions with the running instance. For each provisional e
 
 Idle hook: activate pending definitions; deregister when none remain.
 
+*** with-sprite
+
+: (fn NAME FORM &key NO-LOG)
+
+Evaluate FORM in sprite NAME via emacsclient. Returns the read result, or nil if the connection fails. Unless NO-LOG is non-nil, logs the exchange and updates last-contact.
+
+*** sprite-open-log :command:
+
+Switch to the communication log buffer for sprite NAME.
+
 *** sprite-create :command:
 
+: (fn UNIQUE-NAME &key TIMEOUT)
+
 Spawn a new sprite daemon with UNIQUE-NAME under the current instance. The current instance’s ID becomes the parent. Returns the new sprite struct.
+
+Times out after TIMEOUT seconds.
 
 *** sprite-stop :command:
 
@@ -381,16 +419,6 @@ Transport used for sprite eval calls. ‘emacsclient’ shells out to the emacsc
 *** sprite-communication-fallback :option:
 
 When non-nil, retry with the other backend after a failed direct call. Only applies when ‘sprite-communication-backend’ is ‘direct’: a failed socket connection retries once via emacsclient before giving up.
-
-*** with-sprite
-
-: (fn NAME FORM &key NO-LOG)
-
-Evaluate FORM in sprite NAME via emacsclient. Returns the read result, or nil if the connection fails. Unless NO-LOG is non-nil, logs the exchange and updates last-contact.
-
-*** sprite-open-log :command:
-
-Switch to the communication log buffer for sprite NAME.
 
 *** sprite-open-frame :command:
 
@@ -424,21 +452,15 @@ Return t if this instance has at least one non-decommissioned sprite.
 
 Return t if any accessible sprite are configured.
 
-*** sprite-get-next
-
-Return the struct of the next available sprite, or nil. "Available" means running and not recently contacted.
-
-*** sprite-get-or-create-next
-
-Return the next available sprite, creating one if none are free. Signals ‘user-error’ if ‘sprite-max-count’ would be exceeded.
-
 *** TODO sprite-mode-command-map
 
 *no docstring*
 
 *** sprite-mode-map-prefix :option:
 
-Cons of (KEY . KEYMAP-SYMBOL) controlling where ‘sprite-mode-command-map’ is bound as a nested prefix keymap. Applied when ‘sprite-mode’ is enabled and removed when it is disabled. Set to nil to skip binding it into any parent keymap.
+Cons storing ‘sprite-mode-command-map’ is bound as a nested prefix keymap.
+
+Applied when ‘sprite-mode’ is enabled and removed when it is disabled.  Set to nil to skip binding it into any parent keymap.
 
 *** sprite-mode-map
 
@@ -457,6 +479,7 @@ If called from Lisp, toggle the mode if ARG is ‘toggle’.  Enable the mode if
 To check whether the minor mode is enabled in the current buffer, evaluate ‘(default-value 'sprite-mode)’.
 
 The mode’s hook is called both when the mode is enabled and when it is disabled.
+
 
 * License
 Copyright (C) Sam Kleinman. GPL-3.0 or later. See the source file header

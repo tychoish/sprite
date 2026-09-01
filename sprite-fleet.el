@@ -3,6 +3,7 @@
 ;; Author: Sam Kleinman
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (seq "2.24"))
+;; URL: https://github.com/tychoish/sprite
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
@@ -19,10 +20,10 @@
 ;; not the sum of every call.
 ;;
 ;; Entry points:
-;;   `sprite-mapcar'       — collect, ordered (mirrors `mapcar')
-;;   `sprite-mapc'         — fire-and-forget (mirrors `mapc')
-;;   `sprite-fleet-mapcar' — map over items using a fleet of sprites
-;;   `sprite-let'          — parallel destructuring bind (mirrors `let')
+;;   `sprite-fleet-mapcar-sprites' — collect, ordered (mirrors `mapcar')
+;;   `sprite-fleet-mapc'           — fire-and-forget (mirrors `mapc')
+;;   `sprite-fleet-mapcar'         — map over items using a fleet of sprites
+;;   `sprite-fleet-let'            — parallel destructuring bind (mirrors `let')
 
 ;;; Code:
 
@@ -42,7 +43,7 @@
     `(let ((item ',item) (_ ',item)) ,fn-or-form))
    (t `(funcall ,fn-or-form ',item))))
 
-(cl-defun sprite-mapcar (form sprites &key timeout)
+(cl-defun sprite-fleet-mapcar-sprites (form sprites &key timeout)
   "Evaluate FORM in each of SPRITES concurrently; return results in order.
 Mirrors `mapcar': one result per input, order preserved.  A sprite that
 times out or rejects contributes nil at its position.  SPRITES is a list
@@ -51,7 +52,7 @@ of `sprite' structs, e.g. from `sprite-resolve-list'."
                           sprites)))
     (seq-map (lambda (f) (sprite-future-wait f :timeout timeout)) futures)))
 
-(defun sprite-mapc (form sprites)
+(defun sprite-fleet-mapc (form sprites)
   "Evaluate FORM in each of SPRITES concurrently; discard results.
 Mirrors `mapc': dispatches to every sprite and returns SPRITES immediately
 without waiting for any of them to settle.  SPRITES is a list of `sprite'
@@ -119,7 +120,7 @@ and returns the ordered list of results."
       (sprite-future-wait overall-future :timeout timeout))))
 
 
-(cl-defmacro sprite-let (bindings &rest body)
+(cl-defmacro sprite-fleet-let (bindings &rest body)
   "Like `let', but each binding's value comes from a concurrent sprite eval.
 Each element of BINDINGS is (VAR SPRITE FORM): SPRITE is an expression
 evaluated to a sprite full-name string, FORM is unquoted and evaluated

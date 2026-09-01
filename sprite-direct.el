@@ -1,8 +1,9 @@
-;;; sprite-direct.el --- Direct socket communication with Emacs server processes -*- lexical-binding: t; -*-
+;;; sprite-direct.el --- Direct socket communication with server processes -*- lexical-binding: t; -*-
 
 ;; Author: Sam Kleinman
 ;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1") (seq "2.24") (map "3.0"))
+;; URL: https://github.com/tychoish/sprite
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
@@ -53,7 +54,7 @@
 ;;   `sprite-direct-promise-then'       — run a callback on resolution, no blocking
 ;;   `sprite-direct-list-buffers'       — list buffer names in the sprite
 ;;   `sprite-direct-insert-into-buffer' — insert text at a position
-;;   `with-current-sprite-direct-buffer'— eval body in a remote buffer
+;;   `sprite-direct-with-current-buffer'— eval body in a remote buffer
 ;;   `sprite-direct-read-buffer'        — read buffer contents
 ;;   `sprite-direct-value-of-symbol'    — read a symbol's value
 ;;   `sprite-direct-read-tcp-server-file' — read a TCP server file
@@ -482,7 +483,7 @@ When POSITION is non-nil, go there first; otherwise insert at `point-max'."
            `(progn (goto-char ,position) (insert ,text))
          `(progn (goto-char (point-max)) (insert ,text))))))
 
-(cl-defmacro with-current-sprite-direct-buffer ((conn buf-name) &rest body)
+(cl-defmacro sprite-direct-with-current-buffer ((conn buf-name) &rest body)
   "Evaluate BODY forms in the sprite via CONN with BUF-NAME current.
 BODY is literal Emacs Lisp sent verbatim to the sprite; local variables
 are not in scope.  The result of the last BODY form is returned."

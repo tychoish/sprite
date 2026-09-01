@@ -3,6 +3,7 @@
 ;; Author: Sam Kleinman
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (seq "2.24"))
+;; URL: https://github.com/tychoish/sprite
 ;; Keywords: tools, daemon, processes
 
 ;; This package is free software; you can redistribute it and/or modify
@@ -19,8 +20,8 @@
 ;; `sprite-direct-promise' for the `direct' backend, and a `make-process'
 ;; sentinel for the `emacsclient' backend.
 ;;
-;; Also provides a generator-based async/await layer: `sprite-async-defun'
-;; bodies read as straight-line code while `sprite-await' suspends without
+;; Also provides a generator-based async/await layer: `sprite-future-async-defun'
+;; bodies read as straight-line code while `sprite-future-await' suspends without
 ;; blocking the parent Emacs event loop.
 ;;
 ;; Entry points:
@@ -30,8 +31,8 @@
 ;;   `sprite-future-pending-p'  — predicate: not yet settled
 ;;   `sprite-future-resolved-p' — predicate: settled successfully
 ;;   `sprite-future-rejected-p' — predicate: settled with failure
-;;   `sprite-async-defun'       — define a generator-based async workflow
-;;   `sprite-await'             — suspend a `sprite-async-defun' body on a future
+;;   `sprite-future-async-defun' — define a generator-based async workflow
+;;   `sprite-future-await'       — suspend a `sprite-future-async-defun' body on a future
 
 ;;; Code:
 
@@ -168,7 +169,7 @@ target with no discoverable auth key (see `sprite--direct-target')."
 
 ;;;; Backend: emacsclient subprocess
 
-(defun sprite--settle-future-from-process (future proc)
+(defun sprite-future--settle-from-process (future proc)
   "Settle FUTURE from PROC once its `emacsclient' invocation has exited.
 Exit code 0 resolves FUTURE with PROC's buffer contents read as a Lisp
 value (nil if unreadable, mirroring `sprite--call-and-read-emacsclient');
@@ -184,7 +185,7 @@ any other exit code rejects FUTURE.  Kills PROC's buffer afterward."
     (when (buffer-live-p buf)
       (kill-buffer buf))))
 
-(defun sprite--spawn-emacsclient-future (target form future)
+(defun sprite-future--spawn-emacsclient (target form future)
   "Start an async emacsclient eval of FORM against TARGET, settling FUTURE."
   (let ((proc (make-process
                :name (format "sprite-future-%s" target)
@@ -193,7 +194,7 @@ any other exit code rejects FUTURE.  Kills PROC's buffer afterward."
                               "--eval" (format "%S" form))
                :sentinel (lambda (proc _event)
                            (unless (process-live-p proc)
-                             (sprite--settle-future-from-process future proc))))))
+                             (sprite-future--settle-from-process future proc))))))
     (setf (sprite-future-backend-handle future) proc)))
 
 ;;;; Entry point
@@ -205,7 +206,7 @@ Dispatches on `sprite-communication-backend', the same way
   (let ((future (sprite-future--make :target target :state :pending :callbacks nil)))
     (pcase sprite-communication-backend
       ('direct (sprite-future--eval-direct future form))
-      (_ (sprite--spawn-emacsclient-future target form future)))
+      (_ (sprite-future--spawn-emacsclient target form future)))
     future))
 
 ;;;; Async/await
@@ -214,7 +215,7 @@ Dispatches on `sprite-communication-backend', the same way
 ;; suspended generator -- it only accepts (ITERATOR &optional YIELD-RESULT),
 ;; where YIELD-RESULT becomes `iter-yield's return value, never a thrown
 ;; condition.  So a rejected awaited future is resumed as an ordinary value:
-;; a `sprite-future--rejection' wrapper, which `sprite-await' unwraps and
+;; a `sprite-future--rejection' wrapper, which `sprite-future-await' unwraps and
 ;; re-signals as `sprite-future-rejected' at the suspension point, letting
 ;; workflow bodies catch it with a plain `condition-case'.
 
@@ -222,12 +223,12 @@ Dispatches on `sprite-communication-backend', the same way
 
 (cl-defstruct (sprite-future--rejection (:constructor sprite-future--rejection-make) (:copier nil))
   "Sentinel resumed into a generator when an awaited future rejects.
-See `sprite-await', which unwraps this and re-signals its VALUE."
+See `sprite-future-await', which unwraps this and re-signals its VALUE."
   value)
 
-(cl-defmacro sprite-async-defun (name arglist &rest body)
+(cl-defmacro sprite-future-async-defun (name arglist &rest body)
   "Define NAME as an async sprite workflow.
-Inside BODY, `sprite-await' suspends the generator until a future settles,
+Inside BODY, `sprite-future-await' suspends the generator until a future settles,
 without blocking the parent Emacs event loop.  Calling NAME returns
 immediately with a `sprite-future' for the workflow's overall result."
   (declare (indent defun) (doc-string 3))
@@ -236,54 +237,54 @@ immediately with a `sprite-future' for the workflow's overall result."
     `(defun ,name ,arglist
        ,@(when doc (list doc))
        ,@(when interactive-form (list interactive-form))
-       (sprite--async-run (iter-make ,@body)))))
+       (sprite-future--async-run (iter-make ,@body)))))
 
-(defmacro sprite-await (future)
-  "Inside a `sprite-async-defun' body, suspend until FUTURE settles.
+(defmacro sprite-future-await (future)
+  "Inside a `sprite-future-async-defun' body, suspend until FUTURE settles.
 Resumes with FUTURE's resolved value when it resolves.  When FUTURE
 rejects, signals `sprite-future-rejected' with the rejection value at
-this point, so a `condition-case' wrapping `sprite-await' can catch it."
+this point, so a `condition-case' wrapping `sprite-future-await' can catch it."
   (let ((gresult (make-symbol "result")))
     `(let ((,gresult (iter-yield ,future)))
        (if (sprite-future--rejection-p ,gresult)
            (signal 'sprite-future-rejected (list (sprite-future--rejection-value ,gresult)))
          ,gresult))))
 
-(defun sprite--async-step (gen driver-future yielded)
+(defun sprite-future--async-step (gen driver-future yielded)
   "Advance GEN, resuming with YIELDED's settled outcome; drive DRIVER-FUTURE.
 YIELDED is the `sprite-future' most recently produced by an `iter-yield' in
 GEN, or nil to start the generator for the first time.  Steps GEN once it
 is available (immediately if YIELDED is already settled, otherwise via
 `sprite-future-then'), resuming with the resolved value or, on rejection,
-a `sprite-future--rejection' wrapper for `sprite-await' to re-signal."
+a `sprite-future--rejection' wrapper for `sprite-future-await' to re-signal."
   (if (null yielded)
-      (sprite--async-drive gen driver-future)
+      (sprite-future--async-drive gen driver-future)
     (sprite-future-then
      yielded
-     (lambda (value) (sprite--async-drive gen driver-future value))
-     (lambda (err) (sprite--async-drive gen driver-future (sprite-future--rejection-make :value err))))))
+     (lambda (value) (sprite-future--async-drive gen driver-future value))
+     (lambda (err) (sprite-future--async-drive gen driver-future (sprite-future--rejection-make :value err))))))
 
-(defun sprite--async-drive (gen driver-future &optional value)
+(defun sprite-future--async-drive (gen driver-future &optional value)
   "Resume GEN with VALUE; drive DRIVER-FUTURE to its next step or settlement.
 On `iter-end-of-sequence' (GEN returned normally), resolves DRIVER-FUTURE
 with the returned value.  On any other error -- including an unhandled
-`sprite-future-rejected' from `sprite-await' -- rejects DRIVER-FUTURE."
+`sprite-future-rejected' from `sprite-future-await' -- rejects DRIVER-FUTURE."
   (condition-case resume-error
       (let ((yielded (iter-next gen value)))
-        (sprite--async-step gen driver-future yielded))
+        (sprite-future--async-step gen driver-future yielded))
     (iter-end-of-sequence
      (sprite-future--settle driver-future :resolved (cdr resume-error)))
     (error
      (sprite-future--settle driver-future :rejected resume-error))))
 
-(defun sprite--async-run (gen)
+(defun sprite-future--async-run (gen)
   "Drive generator GEN to completion; return a `sprite-future' for its result.
 Steps GEN immediately; each time it yields a `sprite-future', resumes it
 via `sprite-future-then' once that future settles rather than polling.
 The returned future resolves when GEN returns, or rejects if an error
 propagates out of GEN uncaught."
   (let ((driver-future (sprite-future--make :target nil :state :pending :callbacks nil)))
-    (sprite--async-drive gen driver-future)
+    (sprite-future--async-step gen driver-future nil)
     driver-future))
 
 (provide 'sprite-future)

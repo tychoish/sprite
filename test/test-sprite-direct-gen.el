@@ -308,16 +308,16 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
         (sprite-direct-value-of-symbol conn 'my-var))
       (should (equal '(symbol-value 'my-var) captured)))))
 
-;;;; with-current-sprite-direct-buffer macro
+;;;; sprite-direct-with-current-buffer macro
 
-(ert-deftest sprite-direct-gen/with-current-sprite-direct-buffer-form ()
-  "`with-current-sprite-direct-buffer' wraps body in with-current-buffer."
+(ert-deftest sprite-direct-gen/sprite-direct-with-current-buffer-form ()
+  "`sprite-direct-with-current-buffer' wraps body in with-current-buffer."
   (sprite-direct-gen-test/with-mock-conn conn
     (let (captured)
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
                   (lambda (_c form &rest _)
                     (setq captured form))))
-        (with-current-sprite-direct-buffer (conn "test-buf")
+        (sprite-direct-with-current-buffer (conn "test-buf")
           (insert "hello")
           (point-max)))
       (should (equal 'with-current-buffer (car captured)))
@@ -325,7 +325,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
       (should (member '(insert "hello") (cddr captured)))
       (should (member '(point-max) (cddr captured))))))
 
-(ert-deftest sprite-direct-gen/with-current-sprite-direct-buffer-splices-buffer-name ()
+(ert-deftest sprite-direct-gen/sprite-direct-with-current-buffer-splices-buffer-name ()
   "Buffer name expression is evaluated; result is spliced into form."
   (sprite-direct-gen-test/with-mock-conn conn
     (let ((buf-name "dynamic-buf")
@@ -333,7 +333,7 @@ Emacs 29+ authenticates local sockets via peer UID; no cookie is required."
       (cl-letf (((symbol-function 'sprite-direct-eval-blocking)
                   (lambda (_c form &rest _)
                     (setq captured form))))
-        (with-current-sprite-direct-buffer (conn buf-name)
+        (sprite-direct-with-current-buffer (conn buf-name)
           (point)))
       (should (equal "dynamic-buf" (cadr captured))))))
 

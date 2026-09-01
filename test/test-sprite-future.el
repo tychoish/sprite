@@ -144,7 +144,7 @@
 (ert-deftest sprite-future/eval-dispatches-to-emacsclient-by-default ()
   (let ((sprite-communication-backend 'emacsclient)
         called)
-    (cl-letf (((symbol-function 'sprite--spawn-emacsclient-future)
+    (cl-letf (((symbol-function 'sprite-future--spawn-emacsclient)
                (lambda (&rest _) (setq called t)))
               ((symbol-function 'sprite-future--eval-direct)
                (lambda (&rest _) (error "should not be called"))))
@@ -156,18 +156,17 @@
         called)
     (cl-letf (((symbol-function 'sprite-future--eval-direct)
                (lambda (&rest _) (setq called t)))
-              ((symbol-function 'sprite--spawn-emacsclient-future)
+              ((symbol-function 'sprite-future--spawn-emacsclient)
                (lambda (&rest _) (error "should not be called"))))
       (sprite-future-eval "work.0.render" '(+ 1 2))
       (should called))))
 
 (ert-deftest sprite-future/eval-returns-a-pending-future ()
   (let ((sprite-communication-backend 'emacsclient))
-    (cl-letf (((symbol-function 'sprite--spawn-emacsclient-future) #'ignore))
+    (cl-letf (((symbol-function 'sprite-future--spawn-emacsclient) #'ignore))
       (let ((future (sprite-future-eval "work.0.render" '(+ 1 2))))
         (should (sprite-future-p future))
         (should (equal "work.0.render" (sprite-future-target future)))))))
-
 ;;;; Direct backend: sprite-future--eval-direct
 
 (ert-deftest sprite-future/eval-direct-settles-via-promise-then ()
@@ -203,15 +202,15 @@ without waiting on any promise."
       (sprite-future--eval-direct future '(+ 1 2))
       (should (sprite-future-rejected-p future)))))
 
-;;;; emacsclient backend: sprite--spawn-emacsclient-future / sprite--settle-future-from-process
+;;;; emacsclient backend: sprite-future--spawn-emacsclient / sprite-future--settle-from-process
 
 (ert-deftest sprite-future/spawn-emacsclient-future-invokes-make-process ()
-  "`sprite--spawn-emacsclient-future' passes the right emacsclient command."
+  "`sprite-future--spawn-emacsclient' passes the right emacsclient command."
   (let (captured)
     (cl-letf (((symbol-function 'make-process)
                (lambda (&rest plist) (setq captured plist) 'fake-proc)))
       (let ((future (sprite-future--make :target "work.0.render" :state :pending)))
-        (sprite--spawn-emacsclient-future "work.0.render" '(+ 1 2) future)
+        (sprite-future--spawn-emacsclient "work.0.render" '(+ 1 2) future)
         (should (equal '("emacsclient" "--socket-name" "work.0.render" "--eval" "(+ 1 2)")
                        (plist-get captured :command)))
         (should (eq 'fake-proc (sprite-future-backend-handle future)))))))
@@ -225,7 +224,7 @@ without waiting on any promise."
           (with-current-buffer buf (insert "42"))
           (cl-letf (((symbol-function 'process-exit-status) (lambda (_) 0))
                     ((symbol-function 'process-buffer) (lambda (_) buf)))
-            (sprite--settle-future-from-process future 'fake-proc))
+            (sprite-future--settle-from-process future 'fake-proc))
           (should (sprite-future-resolved-p future))
           (should (= 42 (sprite-future-value future))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
@@ -234,7 +233,7 @@ without waiting on any promise."
   (let ((future (sprite-future--make :state :pending)))
     (cl-letf (((symbol-function 'process-exit-status) (lambda (_) 1))
               ((symbol-function 'process-buffer) (lambda (_) nil)))
-      (sprite--settle-future-from-process future 'fake-proc))
+      (sprite-future--settle-from-process future 'fake-proc))
     (should (sprite-future-rejected-p future))))
 
 (ert-deftest sprite-future/settle-from-process-kills-the-buffer ()
@@ -242,43 +241,44 @@ without waiting on any promise."
         (buf (generate-new-buffer " *sprite-future-test-kill*")))
     (cl-letf (((symbol-function 'process-exit-status) (lambda (_) 0))
               ((symbol-function 'process-buffer) (lambda (_) buf)))
-      (sprite--settle-future-from-process future 'fake-proc))
+      (sprite-future--settle-from-process future 'fake-proc))
     (should-not (buffer-live-p buf))))
 
 ;;;; Async/await
 
 (ert-deftest sprite-future/async-defun-returns-a-future-immediately ()
-  "Calling a `sprite-async-defun' returns a `sprite-future' without blocking."
-  (sprite-async-defun sprite-future-test--noop-workflow ()
+  "Calling a `sprite-future-async-defun' returns a `sprite-future' without blocking."
+  (sprite-future-async-defun sprite-future-test--noop-workflow ()
     1)
   (should (sprite-future-p (sprite-future-test--noop-workflow))))
 
 (ert-deftest sprite-future/async-defun-resolves-with-return-value-no-await ()
-  "A workflow with no `sprite-await' resolves immediately with its return value."
-  (sprite-async-defun sprite-future-test--const-workflow ()
+  "A workflow with no `sprite-future-await' resolves immediately with its return value."
+  (sprite-future-async-defun sprite-future-test--const-workflow ()
     42)
   (should (= 42 (sprite-future-wait (sprite-future-test--const-workflow) :timeout 1))))
 
 (ert-deftest sprite-future/async-await-resumes-with-resolved-value ()
-  "`sprite-await' resumes with the value of an already-resolved future."
-  (sprite-async-defun sprite-future-test--await-workflow (f)
-    (1+ (sprite-await f)))
+  "`sprite-future-await' resumes with the value of an already-resolved future."
+  (sprite-future-async-defun sprite-future-test--await-workflow (f)
+    (1+ (sprite-future-await f)))
   (let ((inner (sprite-future--make :state :resolved :value 9)))
     (should (= 10 (sprite-future-wait (sprite-future-test--await-workflow inner) :timeout 1)))))
 
 (ert-deftest sprite-future/async-await-multistep ()
-  "Sequential `sprite-await' calls thread values through the workflow in order."
-  (sprite-async-defun sprite-future-test--multistep-workflow (a b)
-    (let ((x (sprite-await a)))
-      (+ x (sprite-await b))))
+  "Sequential `sprite-future-await' calls thread values through the workflow in order."
+  (sprite-future-async-defun sprite-future-test--multistep-workflow (a b)
+    (let ((x (sprite-future-await a)))
+      (+ x (sprite-future-await b))))
   (let ((fa (sprite-future--make :state :resolved :value 10))
         (fb (sprite-future--make :state :resolved :value 32)))
     (should (= 42 (sprite-future-wait
                    (sprite-future-test--multistep-workflow fa fb) :timeout 1)))))
+
 (ert-deftest sprite-future/async-await-suspends-until-pending-future-settles ()
-  "`sprite-await' on a still-pending future suspends the workflow without polling."
-  (sprite-async-defun sprite-future-test--suspend-workflow (f)
-    (sprite-await f))
+  "`sprite-future-await' on a still-pending future suspends the workflow without polling."
+  (sprite-future-async-defun sprite-future-test--suspend-workflow (f)
+    (sprite-future-await f))
   (let* ((inner (sprite-future--make :state :pending))
          (outer (sprite-future-test--suspend-workflow inner)))
     (should (sprite-future-pending-p outer))
@@ -287,18 +287,18 @@ without waiting on any promise."
     (should (eq 'done (sprite-future-value outer)))))
 
 (ert-deftest sprite-future/async-await-rejection-propagates-uncaught ()
-  "An uncaught rejection from `sprite-await' rejects the workflow's own future."
-  (sprite-async-defun sprite-future-test--reject-workflow (f)
-    (sprite-await f))
+  "An uncaught rejection from `sprite-future-await' rejects the workflow's own future."
+  (sprite-future-async-defun sprite-future-test--reject-workflow (f)
+    (sprite-future-await f))
   (let* ((inner (sprite-future--make :state :rejected :value 'boom))
          (outer (sprite-future-test--reject-workflow inner)))
     (should (sprite-future-rejected-p outer))))
 
 (ert-deftest sprite-future/async-await-rejection-caught-by-condition-case ()
-  "A workflow body can catch a rejected `sprite-await' with an ordinary `condition-case'."
-  (sprite-async-defun sprite-future-test--catch-workflow (f)
+  "A workflow body can catch a rejected `sprite-future-await' with an ordinary `condition-case'."
+  (sprite-future-async-defun sprite-future-test--catch-workflow (f)
     (condition-case err
-        (sprite-await f)
+        (sprite-future-await f)
       (sprite-future-rejected (list :caught (cadr err)))))
   (let* ((inner (sprite-future--make :state :rejected :value 'boom))
          (outer (sprite-future-test--catch-workflow inner)))
@@ -306,8 +306,8 @@ without waiting on any promise."
     (should (equal '(:caught boom) (sprite-future-value outer)))))
 
 (ert-deftest sprite-future/async-defun-interactive-preserves-commandp ()
-  "sprite-async-defun preserves interactive declaration making commandp true."
-  (sprite-async-defun sprite-future-test--interactive-cmd (&optional _force)
+  "sprite-future-async-defun preserves interactive declaration making commandp true."
+  (sprite-future-async-defun sprite-future-test--interactive-cmd (&optional _force)
     "Interactive test command."
     (interactive "P")
     42)

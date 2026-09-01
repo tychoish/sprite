@@ -13,48 +13,48 @@
 
 (setq sprite-instance-id "work")
 
-;;;; sprite--record-heartbeat
+;;;; sprite-heartbeat--record
 
 (ert-deftest sprite-heartbeat/record-updates-last-contact ()
-  "`sprite--record-heartbeat' sets last-contact on a registered sprite."
+  "`sprite-heartbeat--record' sets last-contact on a registered sprite."
   (let ((sprite--registry (make-hash-table :test #'equal)))
     (sprite--registry-put (sprite--make :name "work.0.render" :idx 0
                                         :parent "work" :unique-name "render"))
-    (sprite--record-heartbeat "work.0.render")
+    (sprite-heartbeat--record "work.0.render")
     (should (sprite-last-contact (sprite--registry-get "work.0.render")))))
 
 (ert-deftest sprite-heartbeat/record-no-op-for-unknown-sprite ()
-  "`sprite--record-heartbeat' is silent when the sprite is not in the registry."
+  "`sprite-heartbeat--record' is silent when the sprite is not in the registry."
   (let ((sprite--registry (make-hash-table :test #'equal)))
-    (sprite--record-heartbeat "work.99.ghost")
+    (sprite-heartbeat--record "work.99.ghost")
     (should (= 0 (hash-table-count sprite--registry)))))
 
 (ert-deftest sprite-heartbeat/record-updates-timestamp-to-now ()
-  "The timestamp written by `sprite--record-heartbeat' is current."
+  "The timestamp written by `sprite-heartbeat--record' is current."
   (let ((sprite--registry (make-hash-table :test #'equal))
         (before (current-time)))
     (sprite--registry-put (sprite--make :name "work.0.r" :idx 0
                                         :parent "work" :unique-name "r"))
-    (sprite--record-heartbeat "work.0.r")
+    (sprite-heartbeat--record "work.0.r")
     (let ((contact (sprite-last-contact (sprite--registry-get "work.0.r"))))
       (should (not (time-less-p contact before))))))
 
-;;;; sprite-parent-socket-name
+;;;; sprite-heartbeat-parent-socket-name
 
 (ert-deftest sprite-heartbeat/parent-socket-from-full-name ()
-  "`sprite-parent-socket-name' extracts the parent component of a full name."
+  "`sprite-heartbeat-parent-socket-name' extracts the parent component of a full name."
   (let ((sprite-instance-id "primary.0.worker"))
-    (should (equal "primary" (sprite-parent-socket-name)))))
+    (should (equal "primary" (sprite-heartbeat-parent-socket-name)))))
 
 (ert-deftest sprite-heartbeat/parent-socket-falls-back-to-self ()
   "When the instance name is not a full sprite name, the instance itself is returned."
   (let ((sprite-instance-id "solo"))
-    (should (equal "solo" (sprite-parent-socket-name)))))
+    (should (equal "solo" (sprite-heartbeat-parent-socket-name)))))
 
-;;;; sprite-send — backend dispatch
+;;;; sprite-heartbeat-send — backend dispatch
 
 (ert-deftest sprite-heartbeat/send-uses-configured-backend ()
-  "`sprite-send' dispatches through `sprite--call-and-read', so it picks up
+  "`sprite-heartbeat-send' dispatches through `sprite--call-and-read', so it picks up
 `sprite-communication-backend' automatically -- no special-casing needed
 in sprite-heartbeat.el itself."
   (let ((sprite-instance-id "primary.0.worker")
@@ -64,11 +64,11 @@ in sprite-heartbeat.el itself."
                (lambda (&rest _) (setq called t) 'the-result))
               ((symbol-function 'sprite--call-and-read-emacsclient)
                (lambda (&rest _) (error "should not be called"))))
-      (should (eq 'the-result (sprite-send (+ 1 2))))
+      (should (eq 'the-result (sprite-heartbeat-send (+ 1 2))))
       (should called))))
 
 (ert-deftest sprite-heartbeat/send-defaults-to-emacsclient-backend ()
-  "`sprite-send' uses the emacsclient backend when unconfigured."
+  "`sprite-heartbeat-send' uses the emacsclient backend when unconfigured."
   (let ((sprite-instance-id "primary.0.worker")
         (sprite-communication-backend 'emacsclient)
         called)
@@ -76,30 +76,30 @@ in sprite-heartbeat.el itself."
                (lambda (&rest _) (setq called t) 'the-result))
               ((symbol-function 'sprite--call-and-read-direct)
                (lambda (&rest _) (error "should not be called"))))
-      (should (eq 'the-result (sprite-send (+ 1 2))))
+      (should (eq 'the-result (sprite-heartbeat-send (+ 1 2))))
       (should called))))
 
-;;;; sprite-defhandler
+;;;; sprite-heartbeat-defhandler
 
 (ert-deftest sprite-heartbeat/defhandler-defines-a-function ()
-  "`sprite-defhandler' produces a callable function."
-  (sprite-defhandler sprite-test--echo-handler (caller msg)
+  "`sprite-heartbeat-defhandler' produces a callable function."
+  (sprite-heartbeat-defhandler sprite-test--echo-handler (caller msg)
     (format "%s: %s" caller msg))
   (should (fboundp 'sprite-test--echo-handler)))
 
 (ert-deftest sprite-heartbeat/defhandler-updates-last-contact ()
-  "The function defined by `sprite-defhandler' calls `sprite--record-heartbeat'."
+  "The function defined by `sprite-heartbeat-defhandler' calls `sprite-heartbeat--record'."
   (let ((sprite--registry (make-hash-table :test #'equal)))
     (sprite--registry-put (sprite--make :name "work.0.r" :idx 0
                                         :parent "work" :unique-name "r"))
-    (sprite-defhandler sprite-test--ping-handler (caller)
+    (sprite-heartbeat-defhandler sprite-test--ping-handler (caller)
       t)
     (sprite-test--ping-handler "work.0.r")
     (should (sprite-last-contact (sprite--registry-get "work.0.r")))))
 
 (ert-deftest sprite-heartbeat/defhandler-executes-body ()
-  "The body of a `sprite-defhandler' form is evaluated and its value returned."
-  (sprite-defhandler sprite-test--add-handler (caller a b)
+  "The body of a `sprite-heartbeat-defhandler' form is evaluated and its value returned."
+  (sprite-heartbeat-defhandler sprite-test--add-handler (caller a b)
     (+ a b))
   (let ((sprite--registry (make-hash-table :test #'equal)))
     (sprite--registry-put (sprite--make :name "work.0.r" :idx 0

@@ -424,16 +424,16 @@ only handling the pending-then-resolved case."
                                      :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/buffer-local-variable ()
-  "A buffer-local variable set via `with-current-sprite-direct-buffer' is readable."
+  "A buffer-local variable set via `sprite-direct-with-current-buffer' is readable."
   (sprite-direct-test/with-daemon conn
     (let ((buf (sprite-direct-test--unique-buf)))
       (unwind-protect
           (progn
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
                                          :timeout sprite-direct-test--eval-timeout)
-            (with-current-sprite-direct-buffer (conn buf)
+            (sprite-direct-with-current-buffer (conn buf)
               (set (make-local-variable 'sprite-direct-test-local-var) 99))
-            (let ((val (with-current-sprite-direct-buffer (conn buf)
+            (let ((val (sprite-direct-with-current-buffer (conn buf)
                          sprite-direct-test-local-var)))
               (should (= 99 val))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)
@@ -441,7 +441,7 @@ only handling the pending-then-resolved case."
                                      :timeout sprite-direct-test--eval-timeout)))))
 
 (ert-deftest sprite-direct-buf/with-current-buffer-macro-result ()
-  "`with-current-sprite-direct-buffer' returns the value of the last form."
+  "`sprite-direct-with-current-buffer' returns the value of the last form."
   (sprite-direct-test/with-daemon conn
     (let ((buf (sprite-direct-test--unique-buf)))
       (unwind-protect
@@ -449,7 +449,7 @@ only handling the pending-then-resolved case."
             (sprite-direct-eval-blocking conn `(get-buffer-create ,buf)
                                          :timeout sprite-direct-test--eval-timeout)
             (sprite-direct-insert-into-buffer conn buf "hello")
-            (let ((result (with-current-sprite-direct-buffer (conn buf)
+            (let ((result (sprite-direct-with-current-buffer (conn buf)
                             (point-max))))
               (should (= 6 result))))
         (sprite-direct-eval-blocking conn `(when (get-buffer ,buf)

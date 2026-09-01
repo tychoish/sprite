@@ -541,12 +541,12 @@ and `sprite-communication-fallback' is non-nil."
 
 (ert-deftest sprite/build-list-entry-structure ()
   "build-list-entry returns (STRUCT VECTOR) with 7 columns: # Def Name Uptime Buffers Last-Seen Spawned-By."
-  (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil))
+  (cl-letf (((symbol-function 'sprite-list--query-buffer-count) (lambda (_) nil))
             ((symbol-function 'sprite--decommissioned-p) (lambda (_) nil)))
     (let ((s (sprite--make :name "work.0.render" :idx 0
                            :parent "work" :unique-name "render"
                            :spawned-by "scratch")))
-      (let* ((entry (sprite--build-list-entry s))
+      (let* ((entry (sprite-list--build-list-entry s))
              (id (car entry))
              (vec (cadr entry)))
         (should (sprite-p id))
@@ -556,17 +556,17 @@ and `sprite-communication-fallback' is non-nil."
         (should (equal "scratch" (aref vec 6)))))))
 
 (ert-deftest sprite/build-list-entry-uptime-nil-when-no-start ()
-  (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil)))
+  (cl-letf (((symbol-function 'sprite-list--query-buffer-count) (lambda (_) nil)))
     (let ((s (sprite--make :name "work.0.render" :idx 0
                            :parent "work" :unique-name "render")))
-      (let ((vec (cadr (sprite--build-list-entry s))))
+      (let ((vec (cadr (sprite-list--build-list-entry s))))
         (should (equal "?" (aref vec 3)))))))
 
 (ert-deftest sprite/build-list-entry-buffers-unknown ()
-  (cl-letf (((symbol-function 'sprite--query-buffer-count) (lambda (_) nil)))
+  (cl-letf (((symbol-function 'sprite-list--query-buffer-count) (lambda (_) nil)))
     (let ((s (sprite--make :name "work.0.render" :idx 0
                            :parent "work" :unique-name "render")))
-      (let ((vec (cadr (sprite--build-list-entry s))))
+      (let ((vec (cadr (sprite-list--build-list-entry s))))
         (should (equal "?" (aref vec 3)))))))
 
 ;;;; Running status
