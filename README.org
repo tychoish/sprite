@@ -2,38 +2,97 @@
 #+OPTIONS: toc:2 num:nil
 
 * Overview
-=sprite.el= manages "sprite" Emacs daemons that are subordinate to a
-parent Emacs instance.  Each sprite runs as a named =emacs --daemon=
-subprocess and is addressable via =emacsclient=.
+:PROPERTIES:
+:CUSTOM_ID: overview
+:END:
 
-Sprite names follow the pattern =<parent>.<idx>.<unique-name>=, where
-=idx= is the lowest integer not already in use for that parent.  The
-registry persists across sessions via =savehist=, and the filesystem
-state directory serves as the ground truth for discovery and recovery.
+=sprite.el= coordinates Emacs daemons that run subordinate to a parent Emacs
+instance (or "sprites").  Each sprite executes as an independent =emacs
+--daemon= subprocess, addressable via Unix domain sockets or TCP.  Sprite
+establishes a convention for collecting and managing an Emacs daemon's state
+files (bookmarks, ~savehist~, ~desktop~, etc.) in a well formed and clearly
+labeled way, to support multiple concurrent emacs daemons on a single system,
+which it extends to managed "sprites."
 
-A companion module, =sprite-session.el=, provides idle-timer and
-systemd-logind sleep hooks that application packages can register
-against, decoupling trigger mechanisms from application-level responses.
+Additionally, sprite includes an elisp-native client to interact with
+emacs daemons, which otherwise require shelling out to the ~emacsclient~ binary.
 
-Entry points:
+Sprite names follow the deterministic pattern =<parent>.<idx>.<unique-name>=.
+The registry persists across sessions via =savehist=, and the filesystem state
+directory preserves state for discovery and crash recovery of the daemons.
 
-- =sprite-list= -- open the sprite overview buffer
-- =sprite-create= -- spawn a new sprite daemon
-- =with-sprite= -- evaluate a form in a named sprite
-- =sprite-get-next= -- get the next available sprite
-- =sprite-get-or-create-next= -- get or create a sprite
+At the simplest level, you can use sprite's naming convention to manage a couple
+of emacs daemons that you use interactively, and avoid "managed "sub-sprite"
+daemons. You can also interactively add in sprites to handle various small
+interactive/manual tasks. There's a tabular view of sprites, that you can use to
+see the state and open frames in these daemons.
+
+On top of these lower-level features, sprite provides a collection of higher
+order tools to interact and use emacs daemon instances: an elisp interface for,
+a background worker pool for parallel processing (with workers that have access
+to your full configuration).
+
+Emacs Lisp tools include: IPC via direct socket communication (=sprite-direct=),
+composable futures and coroutines (=sprite-future=), distributed multi-daemon
+workers (=sprite-fleet=), and power/idle lifecycle hooks (=sprite-session=).
+
+Open the interactive dashboard with ~sprite-list~, or spawn a new daemon with
+~sprite-create~.
+
+* Contents                                                       :TOC:
+- [[#overview][Overview]]
+- [[#installation][Installation]]
+  - [[#elpaish-recommended][ELPAish (Recommended)]]
+  - [[#use-package-with-vc][use-package with VC]]
+  - [[#manual-installation][Manual Installation]]
+- [[#configuration][Configuration]]
+  - [[#key-options--customization][Key Options & Customization]]
+- [[#core-concepts-and-architecture][Core Concepts and Architecture]]
+- [[#example-configurations][Example Configurations]]
+  - [[#dedicated-worker-pool][Dedicated Worker Pool]]
+  - [[#distributed-fleet-task-processing][Distributed Fleet Task Processing]]
+- [[#related-packages][Related Packages]]
+- [[#user-guides][User Guides]]
+- [[#api-reference][API Reference]]
+- [[#license][License]]
 
 * Installation
-** package-vc.el
+:PROPERTIES:
+:CUSTOM_ID: installation
+:END:
 
-Requires Emacs 29.1+.  Run once to clone and register the package:
+** ELPAish (Recommended)
+:PROPERTIES:
+:CUSTOM_ID: elpaish-recommended
+:END:
+Add the ELPAish repository to ~package-archives~:
 
 #+BEGIN_SRC emacs-lisp
-(package-vc-install '(sprite :url "https://github.com/tychoish/sprite"))
+(add-to-list 'package-archives
+             '("elpaish" . "https://tychoish.github.io/elpaish/snapshot/") t)
+(package-refresh-contents)
+#+END_SRC
+
+Install with =package-install=:
+
+#+BEGIN_SRC emacs-lisp
+(package-install 'sprite)
+#+END_SRC
+
+To verify package signatures, import the ELPAish signing key into
+=package.el='s keyring and enable signature checking:
+
+#+BEGIN_SRC emacs-lisp
+(url-copy-file "https://tychoish.github.io/elpaish/elpaish-keyring.gpg"
+               "elpaish-keyring.gpg" t)
+(package-import-keyring "elpaish-keyring.gpg")
+(setq package-check-signature t)
 #+END_SRC
 
 ** use-package with VC
-
+:PROPERTIES:
+:CUSTOM_ID: use-package-with-vc
+:END:
 Requires Emacs 30+.  Installs on first load if not already present:
 
 #+BEGIN_SRC emacs-lisp
@@ -41,446 +100,183 @@ Requires Emacs 30+.  Installs on first load if not already present:
   :vc (:url "https://github.com/tychoish/sprite"))
 #+END_SRC
 
-To also load =sprite-session=:
+** Manual Installation
+:PROPERTIES:
+:CUSTOM_ID: manual-installation
+:END:
+#+BEGIN_SRC sh
+git clone https://github.com/tychoish/sprite ~/.emacs.d/elpa/sprite
+#+END_SRC
 
 #+BEGIN_SRC emacs-lisp
-(use-package sprite-session
-  :vc (:url "https://github.com/tychoish/sprite"))
+(add-to-list 'load-path "~/.emacs.d/elpa/sprite")
+(require 'sprite)
 #+END_SRC
 
-** use-package with load-path
+You can also, with Emacs 29.1+, use ~package-vc-install~:
 
-#+BEGIN_SRC sh
-git clone https://github.com/tychoish/sprite ~/path/to/sprite
+#+BEGIN_SRC emacs-lisp
+(package-vc-install '(sprite :url "https://github.com/tychoish/sprite"))
 #+END_SRC
+
+* Configuration
+:PROPERTIES:
+:CUSTOM_ID: configuration
+:END:
+
+Below is a complete ~use-package~ configuration block setting useful options with explicit defaults and keybindings:
 
 #+BEGIN_SRC emacs-lisp
 (use-package sprite
-  :load-path "~/path/to/sprite"
-  :commands (sprite-list sprite-create sprite-get-next sprite-get-or-create-next))
+  :ensure t
+  :defer t
+  :commands (sprite-list
+             sprite-create
+             sprite-stop
+             sprite-restart
+             sprite-decommission
+             sprite-get-next
+             sprite-get-or-create-next)
+  :bind (("C-c s l" . sprite-list)
+         ("C-c s c" . sprite-create))
+  :init
+  ;; Enable global mode to wire savehist and discover existing daemons
+  (sprite-mode 1)
+  :config
+  ;; Load companion subsystems
+  (require 'sprite-direct)
+  (require 'sprite-future)
+  (require 'sprite-fleet)
+  (require 'sprite-session)
 
-(use-package sprite-session
-  :load-path "~/path/to/sprite"
-  :commands (sprite-session-start-idle-timer sprite-session-start-logind-watch))
+  ;; Daemon management limits and timeouts
+  (setq sprite-max-count 8)                   ; default: 8 (maximum subordinate daemons)
+  (setq sprite-active-threshold 300)          ; default: 300 (seconds before inactive daemon is idle)
+  (setq sprite-startup-timeout 10)            ; default: 10 (seconds to wait for socket availability)
+
+  ;; Direct socket execution settings (sprite-direct)
+  (setq sprite-direct-blocking-timeout 15.0)   ; default: 15.0 (seconds before synchronous socket times out)
+  (setq sprite-direct-async-check-interval 0.05) ; default: 0.05 (seconds between promise poll cycles)
+
+  ;; Power and session triggers (sprite-session)
+  (setq sprite-session-idle-timeout 1800)     ; default: 3600 (seconds of inactivity before idle hooks)
+  (sprite-session-start-idle-timer)
+  (when (executable-find "loginctl")
+    (sprite-session-start-logind-watch)))
 #+END_SRC
 
-** Manual
+** Key Options & Customization
+:PROPERTIES:
+:CUSTOM_ID: key-options--customization
+:END:
+- *Daemon Concurrency*: ~sprite-max-count~ specifies the upper boundary of subordinate daemon processes that ~sprite-get-or-create-next~ will spawn.
+- *Availability Window*: ~sprite-active-threshold~ controls the duration in seconds since last contact after which a running daemon is marked idle and available for reassignment.
+- *Socket Timeouts*: ~sprite-direct-blocking-timeout~ defines the fail-safe timeout for synchronous expressions evaluated over direct sockets.
+- *Idle Monitoring*: ~sprite-session-idle-timeout~ governs how long user input must pause before ~sprite-session-idle-hook~ callbacks execute.
 
-#+BEGIN_SRC sh
-git clone https://github.com/tychoish/sprite ~/path/to/sprite
-#+END_SRC
+* Core Concepts and Architecture
+:PROPERTIES:
+:CUSTOM_ID: core-concepts-and-architecture
+:END:
+
+1. *Parent-Child Subordination*: The parent Emacs instance retains authority over its subordinate daemons. Each daemon runs isolated in its own operating system process, preventing long-running tasks or memory leaks from freezing the parent's user interface.
+2. *Deterministic Socket Addressing*: Sockets follow =<parent>.<idx>.<name>=, mapped directly into the user's Emacs server socket directory.
+3. *Filesystem as Ground Truth*: Daemons write state metadata to the filesystem on startup. If the parent restarts, =sprite-mode= inspects state files and seamlessly reattaches to running daemons.
+4. *Direct Socket Protocol*: Bypasses the overhead of repeated =emacsclient= process launches by holding open native Lisp socket streams for batch evaluations.
+
+* Example Configurations
+:PROPERTIES:
+:CUSTOM_ID: example-configurations
+:END:
+
+** Dedicated Worker Pool
+:PROPERTIES:
+:CUSTOM_ID: dedicated-worker-pool
+:END:
+
+Pre-warm a pool of dedicated worker daemons on parent startup:
 
 #+BEGIN_SRC emacs-lisp
-(add-to-list 'load-path "~/path/to/sprite")
-(require 'sprite)
-(require 'sprite-session)  ; optional
+(with-eval-after-load 'sprite
+  (dolist (worker '("worker-1" "worker-2" "builder"))
+    (unless (member worker (mapcar #'sprite-name (sprite-resolve-list)))
+      (sprite-create worker))))
 #+END_SRC
+
+** Distributed Fleet Task Processing
+:PROPERTIES:
+:CUSTOM_ID: distributed-fleet-task-processing
+:END:
+
+Distribute batch document generation or compilation across a fleet of subordinate daemons:
+
+#+BEGIN_SRC emacs-lisp
+(require 'sprite-fleet)
+
+(defun build-all-packages (packages)
+  "Compile PACKAGES in parallel across available sprite daemons."
+  (sprite-fleet-mapcar
+   (lambda (pkg)
+     (byte-compile-file pkg))
+   packages
+   :fleet-size 4
+   :timeout 60))
+#+END_SRC
+
+* Related Packages
+:PROPERTIES:
+:CUSTOM_ID: related-packages
+:END:
+
+- [[https://tychoish.github.io/elpaish/][elpaish]]: Emacs Lisp package management, recipe build system, and snapshot ELPA archive used to distribute =sprite=.
+- [[https://github.com/jwiegley/emacs-async][async.el]]: Simple asynchronous child process execution for Emacs.
+- [[https://github.com/alphapapa/async-await][async-await]]: Generator-based async/await syntax for Emacs Lisp.
+- [[https://github.com/kiwanami/emacs-deferred][deferred.el]]: Deferred and promise abstractions for asynchronous Emacs operations.
+
+* User Guides
+:PROPERTIES:
+:CUSTOM_ID: user-guides
+:END:
+Detailed architecture and workflow guides live under [[file:docs/][docs/]]:
+
+- [[file:docs/daemon-lifecycle.org][Daemon Lifecycle and Architecture]]
+- [[file:docs/direct-socket.org][Direct Socket Communication Protocol]]
+- [[file:docs/futures-and-fleet.org][Futures, Async/Await, and Fleet Coordination]]
+- [[file:docs/session-triggers.org][Session Lifecycle and Sleep Hooks]]
+- [[file:docs/sprite-list.org][Interactive Sprite Dashboard]]
 
 * API Reference
-#+BEGIN_SRC emacs-lisp :results output raw :exports none
-  (require 'org-docsgen)
-  (org-docsgen-run
-   :scope 'exported
-   :include-kinds '(customs)
-   :namespace "sprite")
-#+END_SRC
-
-#+RESULTS:
-*** sprite-direct-open
-
-Return a ‘sprite-direct-conn’ for TARGET. TARGET is a Unix socket name (e.g. "work.0.render") or HOST:PORT:KEY. For TCP targets an auth key is required and ‘user-error’ is signalled when none is found.  For Unix sockets the auth key is optional: Emacs 29+ authenticates local connections via peer UID, so no cookie file is written.
-
-*** with-sprite-direct
-
-: (fn (VAR TARGET) &rest BODY)
-
-Bind VAR to a connection context for TARGET and evaluate BODY. Each operation in BODY opens a transient socket as needed. TARGET is evaluated once; the conn is created by ‘sprite-direct-open’.
-
-*** sprite-direct-eval-blocking
-
-: (fn CONN FORM &key TIMEOUT)
-
-Evaluate FORM in the sprite via CONN; return the Lisp value. Opens a transient socket, sends the form, and blocks using the generator receive loop.  TIMEOUT overrides ‘sprite-direct-blocking-timeout’. Returns nil on connection failure or server error.
-
-*** sprite-direct-call-and-read
-
-: (fn TARGET FORM &key TIMEOUT)
-
-Evaluate FORM in the Emacs server at TARGET; return the read Lisp value. Drop-in replacement for ‘sprite--call-and-read’ in sprite.el. TARGET is a Unix socket name or HOST:PORT:KEY TCP string. TIMEOUT is passed to ‘sprite-direct-eval-blocking’. Returns nil on connection failure, missing auth key, or server error.
-
-*** sprite-direct-eval-non-blocking
-
-: (fn CONN FORM &key RESULT-BUFFER)
-
-Evaluate FORM in CONN asynchronously; return a ‘sprite-direct-promise’. The promise resolves when the server closes the connection (via sentinel). RESULT-BUFFER is an optional buffer name; when the promise resolves, the result is appended to it as a ‘prin1’ line.  Returns the promise immediately. If the connection cannot be opened, the promise is in :rejected state.
-
-*** sprite-direct-promise-pending-p
-
-Return t when PROMISE has not yet resolved or been rejected.
-
-*** sprite-direct-promise-resolved-p
-
-Return t when PROMISE resolved successfully.
-
-*** sprite-direct-promise-rejected-p
-
-Return t when PROMISE failed. Either the connection could not be opened, or it closed without ever producing a ‘-print’/‘-error’ response line.
-
-*** sprite-direct-promise-wait
-
-: (fn PROMISE &key TIMEOUT)
-
-Block until PROMISE resolves; return its value or nil on timeout/rejection. Drives process output while waiting.  TIMEOUT overrides ‘sprite-direct-blocking-timeout’; nil means wait indefinitely.
-
-*** sprite-direct-promise-then
-
-Arrange for CALLBACK to run once PROMISE leaves its ‘:pending’ state. Unlike ‘sprite-direct-promise-wait’, this does not block: it polls PROMISE on a repeating timer (‘sprite-direct-async-check-interval’) and cancels itself the first time ‘sprite-direct-promise-pending-p’ is nil, at which point it calls CALLBACK with two arguments, STATE (‘:resolved’ or ‘:rejected’) and VALUE (‘sprite-direct-promise-value’, nil when rejected). The promise’s own sentinel still does the actual work of receiving the result; this only supplies the missing "notify me when done" callback on top of the pending/resolved/rejected state it already exposes.  Returns the timer, so the caller can ‘cancel-timer’ it to abandon the callback.
-
-*** sprite-direct-list-buffers
-
-Return a list of buffer names in the sprite via CONN.
-
-*** sprite-direct-insert-into-buffer
-
-: (fn CONN BUF-NAME TEXT &key POSITION)
-
-Insert TEXT into BUF-NAME in the sprite via CONN. When POSITION is non-nil, go there first; otherwise insert at ‘point-max’.
-
-*** TODO sprite-direct-with-current-buffer
-
-*no docstring*
-
-*** sprite-direct-read-buffer
-
-: (fn CONN BUF-NAME &key START END)
-
-Return the contents of BUF-NAME in the sprite via CONN. START and END are buffer positions (defaults: ‘point-min’ and ‘point-max’). Returns a string, or nil on failure.
-
-*** sprite-direct-value-of-symbol
-
-Return the value of SYMBOL in the sprite via CONN. Evaluates ‘(symbol-value 'SYMBOL)’ in the sprite; returns nil on failure.
-
-*** sprite-direct-read-tcp-server-file
-
-Read the TCP server file at PATH; return its HOST:PORT:KEY string. Returns nil when PATH is absent or unreadable.
-
-*** TODO sprite-fleet-mapcar-sprites
-
-*no docstring*
-
-*** TODO sprite-fleet-mapc
-
-*no docstring*
-
-*** sprite-fleet-mapcar
-
-: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES TIMEOUT ASYNC)
-
-Evaluate FN-OR-FORM for each item in ITEMS using a fleet of sprites. FN-OR-FORM can be a unary function/lambda symbol or a form to evaluate. When FN-OR-FORM is a function symbol or lambda, each item is passed as an arg. When FN-OR-FORM is a form containing ‘item’ or ‘_’, that form is evaluated remotely with the item bound.
-
-FLEET-SIZE is the maximum number of concurrent sprites to use (defaults to ‘sprite-max-count’ or the length of ITEMS).
-
-SPRITES is an optional list of sprite structs or target name strings to use as the worker fleet.  When omitted, sprites are obtained via ‘sprite-get-or-create-fleet’.
-
-TIMEOUT is passed to ‘sprite-future-wait’ when operating synchronously.
-
-If ASYNC is non-nil, returns a ‘sprite-future’ immediately that resolves to the ordered list of results when all items complete.  Otherwise, blocks and returns the ordered list of results.
-
-*** TODO sprite-fleet-let
-
-*no docstring*
-
-*** sprite-future-pending-p
-
-Return t when FUTURE has not yet resolved or been rejected.
-
-*** sprite-future-resolved-p
-
-Return t when FUTURE resolved successfully.
-
-*** sprite-future-rejected-p
-
-Return t when FUTURE failed. For the ‘direct’ backend this delegates to ‘sprite-direct-promise-rejected-p’ via the promise sentinel; for ‘emacsclient’ it reflects a non-zero exit code from the ‘emacsclient’ process.
-
-*** sprite-future-then
-
-Chain ON-RESOLVE (and optionally ON-REJECT) onto FUTURE. Returns a new ‘sprite-future’ that settles once FUTURE does: ON-RESOLVE runs (and its return value resolves the new future) if FUTURE resolves; ON-REJECT runs if FUTURE rejects.  Whichever callback is omitted passes FUTURE’s own state/value through unchanged.  If FUTURE has already settled, the callback runs immediately and the new future settles synchronously; otherwise it runs later, when FUTURE settles.
-
-*** sprite-future-wait
-
-: (fn FUTURE &key TIMEOUT)
-
-Block until FUTURE settles; return its value or nil on timeout/rejection. Drives process output while waiting, mirroring ‘sprite-direct-promise-wait’. TIMEOUT overrides ‘sprite-direct-blocking-timeout’; nil waits indefinitely.
-
-*** sprite-future-eval
-
-Evaluate FORM in sprite TARGET asynchronously; return a ‘sprite-future’. Dispatches on ‘sprite-communication-backend’, the same way ‘sprite--call-and-read’ does for the synchronous API.
-
-*** TODO sprite-future-rejected
-
-*no docstring*
-
-*** TODO sprite-future-async-defun
-
-*no docstring*
-
-*** TODO sprite-future-await
-
-*no docstring*
-
-*** TODO sprite-heartbeat-defhandler
-
-*no docstring*
-
-*** TODO sprite-heartbeat-parent-socket-name
-
-*no docstring*
-
-*** TODO sprite-heartbeat-send
-
-*no docstring*
-
-*** sprite-list-mode :command:
-
-Major mode for viewing and managing sprite daemons.
-
-Key             Binding
-
-TAB		forward-button SPC		scroll-up-command -		negative-argument 0 .. 9		digit-argument <		beginning-of-buffer >		end-of-buffer ?		sprite-list-menu S		tabulated-list-sort c		sprite-list-create d		sprite-list-decommission f		sprite-list-open-frame g		sprite-list-refresh h		describe-mode i		sprite-list-info m		sprite-list-menu n		next-line o		sprite-list-open-log p		sprite-list-check q		quit-window r		sprite-list-restart s		sprite-list-stop {		tabulated-list-narrow-current-column }		tabulated-list-widen-current-column DEL		scroll-down-command S-SPC		scroll-down-command M-<left>	tabulated-list-previous-column M-<right>	tabulated-list-next-column <backtab>	backward-button <follow-link>	mouse-face <mouse-2>	mouse-select-window
-
-C-M-i		backward-button
-
-In addition to any hooks its parent mode ‘tabulated-list-mode’ might have run, this mode runs the hook ‘sprite-list-mode-hook’, as the final or penultimate step during initialization.
-
-*** sprite-list-refresh :command:
-
-Refresh the sprite overview buffer.
-
-*** sprite-list-info :command:
-
-Show a help-window detail buffer for the sprite at point.
-
-*** sprite-list :command:
-
-Open the sprite overview buffer.
-
-*** sprite-list-create :command:
-
-Create a new sprite from the overview buffer.
-
-*** sprite-list-decommission :command:
-
-Decommission the sprite at point.
-
-*** sprite-list-restart :command:
-
-Restart the sprite at point.
-
-*** sprite-list-stop :command:
-
-Stop the sprite at point.
-
-*** sprite-list-open-log :command:
-
-Open the communication log for the sprite at point.
-
-*** sprite-list-check :command:
-
-Verify whether the sprite at point is reachable via emacsclient. Updates the sprite’s running status and refreshes the list.
-
-*** sprite-list-open-frame :command:
-
-Open a new Emacs frame connected to the sprite at point.
-
-** Emacs Idle Hook
-
-*** sprite-session-idle-timeout :option:
-
-Seconds of Emacs idle before ‘sprite-session-idle-hook’ fires.
-
-*** sprite-session-start-idle-timer
-
-Start a repeating idle timer that runs ‘sprite-session-idle-hook’. Cancels any existing timer first.
-
-*** sprite-session-stop-idle-timer
-
-Cancel the idle timer.
-
-*** sprite-session-sync-idle-timer
-
-Start or stop the idle timer to match ‘sprite-session-idle-hook’ membership. Starts the timer when the hook is non-nil; stops it when empty. Always logs: sprite-session: idle timer <running|stopped> (<N> registered ops)
-
-*** sprite-session-add-on-idle
-
-Add FN to ‘sprite-session-idle-hook’ and start the timer if needed. Logs the registration and delegates to ‘sprite-session-sync-idle-timer’.
-
-*** sprite-session-remove-on-idle
-
-Remove FN from ‘sprite-session-idle-hook’ and stop the timer if the hook is empty. Logs the deregistration and delegates to ‘sprite-session-sync-idle-timer’.
-
-** Systemd Logind Prepareforsleep Hook
-
-*** sprite-session-start-logind-watch
-
-Register DBus signals to run sleep/wake/lock/screensaver hooks. Cancels any existing registrations first to prevent duplicates.
-
-*** sprite-session-stop-logind-watch
-
-Unregister the logind PrepareForSleep DBus signal and other signals.
-
-*** sprite-resolve-instance-id
-
-Return the current Emacs instance ID. Resolution order: daemon name, ‘sprite-cli-instance-id’, ‘sprite-instance-id’, then "solo".
-
-*** sprite-instance-name
-
-Return the current Emacs instance name, initialising it if needed. Caches the result in ‘sprite-instance-id’.  This is the preferred public accessor; call ‘sprite-resolve-instance-id’ only when the raw resolution chain must be re-evaluated.
-
-*** TODO sprite-system-name
-
-*no docstring*
-
-*** sprite-conf-host-and-instance
-
-Return (HOSTNAME INSTANCE-ID) for state-path construction.
-
-*** sprite-state-file-prefix
-
-Return the instance-scoped filename prefix for NAME. Produces HOSTNAME-INSTANCE-NAME[-USERNAME] where USERNAME is included only when running as root or under a symlinked ‘user-emacs-directory’.
-
-*** sprite-state-path
-
-Return the full state-directory path for NAME, scoped to this host and instance.
-
-*** sprite-cli-resolve-id
-
-Parse --id=NAME or --id NAME from ‘command-line-functions’ context. Sets ‘sprite-cli-instance-id’ when found.
-
-*** sprite-state-directory
-
-: (fn &key FULL-NAME)
-
-Return the state directory for sprite instance FULL-NAME, or the sprite root if nil.
-
-*** sprite-conf-state-path
-
-: (fn NAME &key FULL-NAME)
-
-Return path for NAME within FULL-NAME’s state directory. If FULL-NAME is nil, returns path under the sprite root.
-
-*** sprite-define
-
-: (fn &key UNIQUE-NAME (PARENT (sprite-instance-name)) (STARTUP 'idle))
-
-Declare that a sprite named UNIQUE-NAME should exist under PARENT. STARTUP controls creation when absent: ‘sync’  — create immediately when ‘sprite-defs-activate’ runs. ‘idle’  — create on the next Emacs idle period after activation. Definitions persist across sessions via savehist.  Returns the provisional sprite struct.
-
-*** sprite-defs-activate
-
-Reconcile declared definitions with the running instance. For each provisional entry whose :parent matches ‘sprite-instance-name’: - If a real sprite with the same (parent, unique-name) is already in the registry, promote it (copy startup, remove provisional entry). - If absent and startup is ‘sync’, create the sprite immediately. - If absent and startup is ‘idle’, schedule via the session idle hook.
-
-*** sprite-defs-activate-idle-check
-
-Idle hook: activate pending definitions; deregister when none remain.
-
-*** with-sprite
-
-: (fn NAME FORM &key NO-LOG)
-
-Evaluate FORM in sprite NAME via emacsclient. Returns the read result, or nil if the connection fails. Unless NO-LOG is non-nil, logs the exchange and updates last-contact.
-
-*** sprite-open-log :command:
-
-Switch to the communication log buffer for sprite NAME.
-
-*** sprite-create :command:
-
-: (fn UNIQUE-NAME &key TIMEOUT)
-
-Spawn a new sprite daemon with UNIQUE-NAME under the current instance. The current instance’s ID becomes the parent. Returns the new sprite struct.
-
-Times out after TIMEOUT seconds.
-
-*** sprite-stop :command:
-
-Send (kill-emacs) to sprite NAME via emacsclient.
-
-*** sprite-restart :command:
-
-Restart sprite NAME: stop it then create a new daemon with the same unique-name.
-
-*** sprite-decommission :command:
-
-Decommission sprite NAME: stop it and write the DECOMMISSIONED marker.
-
-*** sprite-communication-backend :option:
-
-Transport used for sprite eval calls. ‘emacsclient’ shells out to the emacsclient binary (default, matches current behaviour).  ‘direct’ speaks the server wire protocol over a socket via sprite-direct.el, with no subprocess.
-
-*** sprite-communication-fallback :option:
-
-When non-nil, retry with the other backend after a failed direct call. Only applies when ‘sprite-communication-backend’ is ‘direct’: a failed socket connection retries once via emacsclient before giving up.
-
-*** sprite-open-frame :command:
-
-Open a new Emacs frame connected to SPRITE. When called interactively, select from accessible sprites via ‘annotated-completing-read’ (when available), annotated with status and uptime.
-
-*** sprite-active-threshold :option:
-
-Seconds since last-contact after which a sprite is considered available. A sprite is "active" if it was contacted within this many seconds.
-
-*** sprite-max-count :option:
-
-Maximum number of sprite ‘sprite-get-or-create-next’ will spawn.
-
-*** sprite-startup-timeout :option:
-
-Seconds to wait for a newly spawned sprite server to accept connections.
-
-*** sprite-worker-p
-
-Return t if this instance is itself a sprite (has a parent).
-
-*** sprite-resolve-list
-
-Return list of sprite structs accessible to this instance. Includes direct children.  If this instance is itself a sprite (worker), also includes sibling sprite from the same parent.
-
-*** sprite-controller-p
-
-Return t if this instance has at least one non-decommissioned sprite.
-
-*** sprite-available-p
-
-Return t if any accessible sprite are configured.
-
-*** TODO sprite-mode-command-map
-
-*no docstring*
-
-*** sprite-mode-map-prefix :option:
-
-Cons storing ‘sprite-mode-command-map’ is bound as a nested prefix keymap.
-
-Applied when ‘sprite-mode’ is enabled and removed when it is disabled.  Set to nil to skip binding it into any parent keymap.
-
-*** sprite-mode-map
-
-Empty by design -- ‘sprite-mode’ ships no default bindings of its own. See ‘sprite-mode-command-map’ for commands, nested per ‘sprite-mode-map-prefix’; bind directly into this map for anything that should be active unconditionally whenever ‘sprite-mode’ is on.
-
-*** sprite-mode :command:
-
-Global minor mode for managing sprite (subordinate Emacs daemon) state.
-
-Enabling wires the registry into ‘savehist’ persistence and scans the filesystem for already-running sprites to populate the registry; disabling removes the ‘savehist’ hooks and variable registration. See ‘sprite-mode-map’ and ‘sprite-mode-command-map’.
-
-This is a global minor mode.  If called interactively, toggle the ‘Sprite mode’ mode.  If the prefix argument is positive, enable the mode, and if it is zero or negative, disable the mode.
-
-If called from Lisp, toggle the mode if ARG is ‘toggle’.  Enable the mode if ARG is nil, omitted, or is a positive number.  Disable the mode if ARG is a negative number.
-
-To check whether the minor mode is enabled in the current buffer, evaluate ‘(default-value 'sprite-mode)’.
-
-The mode’s hook is called both when the mode is enabled and when it is disabled.
-
+:PROPERTIES:
+:CUSTOM_ID: api-reference
+:END:
+
+Detailed API documentation for all modules, options, and commands is available in [[file:docs/api.org][docs/api.org]].
+
+| Symbol / Command                                                    | Kind     | Description                                                         |
+|---------------------------------------------------------------------+----------+---------------------------------------------------------------------|
+| [[file:docs/api.org::#sprite-list][~sprite-list~]]                                                      | Command  | Open the interactive tabulated-list daemon dashboard buffer         |
+| [[file:docs/api.org::#sprite-create][~sprite-create~]]                                                  | Command  | Spawn and initialize a new subordinate daemon process               |
+| [[file:docs/api.org::#with-sprite][~with-sprite~]]                                                      | Macro    | Evaluate an Elisp expression inside a named subordinate daemon      |
+| [[file:docs/api.org::#sprite-get-or-create-next][~sprite-get-or-create-next~]]                                      | Function | Return next available idle daemon, spawning one if pool not full    |
+| [[file:docs/api.org::#sprite-get-next][~sprite-get-next~]]                                                  | Function | Return next available idle daemon without spawning new processes    |
+| [[file:docs/api.org::#sprite-stop][~sprite-stop~]]                                                      | Command  | Gracefully stop a running subordinate daemon process                |
+| [[file:docs/api.org::#sprite-restart][~sprite-restart~]]                                                  | Command  | Terminate and immediately restart a subordinate daemon              |
+| [[file:docs/api.org::#sprite-decommission][~sprite-decommission~]]                                            | Command  | Mark a daemon decommissioned and clean up its filesystem state      |
+| [[file:docs/api.org::#sprite-open-frame][~sprite-open-frame~]]                                                | Command  | Open an interactive GUI or terminal frame attached to a daemon      |
+| [[file:docs/api.org::#sprite-mode][~sprite-mode~]]                                                      | Command  | Global minor mode enabling state discovery and savehist persistence |
+| [[file:docs/api.org::#sprite-direct-call-and-read][~sprite-direct-call-and-read~]]                                    | Function | Fast synchronous evaluation over socket without emacsclient fork    |
+| [[file:docs/api.org::#sprite-direct-eval-non-blocking][~sprite-direct-eval-non-blocking~]]                                | Function | Asynchronous direct socket evaluation returning a promise           |
+| [[file:docs/api.org::#sprite-future-eval][~sprite-future-eval~]]                                                | Function | Dispatch background computation returning a composable future       |
+| [[file:docs/api.org::#sprite-future-await][~sprite-future-await~]]                                              | Macro    | Coroutine await operator inside async functions                     |
+| [[file:docs/api.org::#sprite-fleet-mapcar][~sprite-fleet-mapcar~]]                                              | Function | Scatter/gather parallel mapping across a fleet of daemon workers    |
+| [[file:docs/api.org::#sprite-session-start-idle-timer][~sprite-session-start-idle-timer~]]                                  | Command  | Start global user inactivity timer to throttle background workers   |
+| [[file:docs/api.org::#sprite-max-count][~sprite-max-count~]]                                                  | Option   | Maximum allowable subordinate daemon instances                      |
+| [[file:docs/api.org::#sprite-active-threshold][~sprite-active-threshold~]]                                          | Option   | Inactivity threshold in seconds before a daemon is deemed available |
 
 * License
-Copyright (C) Sam Kleinman. GPL-3.0 or later. See the source file header
+:PROPERTIES:
+:CUSTOM_ID: license
+:END:
+
+Copyright (C) Sam Kleinman.  GPL-3.0 or later.  See the source file header
 for the full license text.
