@@ -768,14 +768,14 @@ also includes sibling sprite from the same parent."
   "Return target name string for sprite S (struct or string)."
   (if (stringp s) s (sprite-name s)))
 
- ;;;###autoload
- (defun sprite-get-next ()
+;;;###autoload
+(defun sprite-get-next ()
    "Return the struct of the next available sprite, or nil.
  \"Available\" means running and not recently contacted."
    (seq-find #'sprite--usable-p (sprite-resolve-list)))
 
- ;;;###autoload
- (cl-defun sprite-get-or-create-next (&key timeout)
+;;;###autoload
+(cl-defun sprite-get-or-create-next (&key timeout)
    "Return the next available sprite, creating one if none are free.
  Times out after TIMEOUT seconds.  Signals `user-error' if
  `sprite-max-count' would be exceeded."
@@ -786,8 +786,8 @@ also includes sibling sprite from the same parent."
                          active-count sprite-max-count)
            (sprite-create (format "worker-%d" active-count) :timeout timeout)))))
 
- ;;;###autoload
- (cl-defun sprite-get-or-create-fleet (count &key timeout)
+;;;###autoload
+(cl-defun sprite-get-or-create-fleet (count &key timeout)
    "Return a list of up to COUNT available or newly created sprite structs.
  Reuses available sprites first, spawning new ones up to `sprite-max-count'
  or COUNT."
