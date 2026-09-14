@@ -423,12 +423,23 @@ DIRECTION is the symbol `sent' or `received'.  CONTENT is a string."
                       (format-time-string sprite--log-time-format)
                       content)))))
 
+(defun sprite--emacsclient-address-args (name)
+  "Return the emacsclient CLI arguments that address sprite NAME.
+Sprite daemons started while `server-use-tcp' is non-nil register a TCP
+auth file in `server-auth-dir', not a Unix socket in `server-socket-dir',
+so they must be addressed with `--server-file' rather than
+`--socket-name'."
+  (if (bound-and-true-p server-use-tcp)
+      (list "--server-file" name)
+    (list "--socket-name" name)))
+
 (cl-defun sprite--call (name form &key buffer)
   "The single site where emacsclient is invoked for eval-based communication.
 Evaluates FORM in sprite NAME; captures output in BUFFER when non-nil.
 Returns the emacsclient exit code."
-  (call-process "emacsclient" nil buffer nil
-                "--socket-name" name "--eval" (format "%S" form)))
+  (apply #'call-process "emacsclient" nil buffer nil
+         (append (sprite--emacsclient-address-args name)
+                 (list "--eval" (format "%S" form)))))
 
 (defun sprite--call-and-read-emacsclient (name form)
   "Invoke emacsclient against NAME evaluating FORM; return the read result.
@@ -697,10 +708,11 @@ uptime."
   (let ((name (sprite-name sprite)))
     (with-environment-variables (("DISPLAY" (or (getenv "DISPLAY") ":0"))
                                  ("TERM" nil))
-      (start-process
-       (format "sprite-frame-%s" name)
-       (get-buffer-create (sprite--log-buffer-name name))
-       "emacsclient" "--no-wait" "--create-frame" "--server-file" name))))
+      (apply #'start-process
+             (format "sprite-frame-%s" name)
+             (get-buffer-create (sprite--log-buffer-name name))
+             "emacsclient" "--no-wait" "--create-frame"
+             (sprite--emacsclient-address-args name)))))
 
 ;;;; Fleet API
 
@@ -764,6 +776,14 @@ also includes sibling sprite from the same parent."
   (and (sprite--running-p (sprite-name s))
        (sprite--available-p s)))
 
+(defun sprite--running-list ()
+  "Return the subset of `sprite-resolve-list' that are actually running.
+`sprite-resolve-list' includes any registry entry that has not been
+decommissioned, even a stale one whose daemon process is long gone;
+counting those against `sprite-max-count' would falsely report the
+fleet as busy."
+  (seq-filter (lambda (s) (sprite--running-p (sprite-name s))) (sprite-resolve-list)))
+
 (defun sprite--target-name (s)
   "Return target name string for sprite S (struct or string)."
   (if (stringp s) s (sprite-name s)))
@@ -780,7 +800,7 @@ also includes sibling sprite from the same parent."
  Times out after TIMEOUT seconds.  Signals `user-error' if
  `sprite-max-count' would be exceeded."
    (or (sprite-get-next)
-       (let ((active-count (length (sprite-resolve-list))))
+       (let ((active-count (length (sprite--running-list))))
          (if (>= active-count sprite-max-count)
              (user-error "All %d sprite are busy and max-count (%d) reached"
                          active-count sprite-max-count)
@@ -793,7 +813,7 @@ also includes sibling sprite from the same parent."
  or COUNT."
    (let* ((available (seq-take (seq-filter #'sprite--usable-p (sprite-resolve-list)) count))
           (needed (- count (length available)))
-          (active-count (length (sprite-resolve-list)))
+          (active-count (length (sprite--running-list)))
           (created-list nil)
           (created nil))
      (while (and (> needed 0) (< active-count sprite-max-count))

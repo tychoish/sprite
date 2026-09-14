@@ -190,8 +190,9 @@ any other exit code rejects FUTURE.  Kills PROC's buffer afterward."
   (let ((proc (make-process
                :name (format "sprite-future-%s" target)
                :buffer (generate-new-buffer " *sprite-future*")
-               :command (list "emacsclient" "--socket-name" target
-                              "--eval" (format "%S" form))
+               :command (append (list "emacsclient")
+                                 (sprite--emacsclient-address-args target)
+                                 (list "--eval" (format "%S" form)))
                :sentinel (lambda (proc _event)
                            (unless (process-live-p proc)
                              (sprite-future--settle-from-process future proc))))))
