@@ -12,17 +12,28 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: silex/emacs:${{ matrix.emacs_version }}-ci
+    container: silex/emacs:${{ matrix.emacs-version }}-ci
     timeout-minutes: 5
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        emacs_version:
+        emacs-version:
           - "29.4"
           - "30.2"
 
     steps:
       - uses: actions/checkout@v5
-      - run: emacs --script run-tests
+
+      - name: Run Tests
+        uses: tychoish/elisp-ci@v0.1.0
+        with:
+          test-files: |
+            - test/test-sprite.el
+            - test/test-sprite-direct.el
+            - test/test-sprite-direct-gen.el
+            - test/test-sprite-fleet.el
+            - test/test-sprite-future.el
+            - test/test-sprite-heartbeat.el
+            - test/test-sprite-session.el
