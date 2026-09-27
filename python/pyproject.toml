@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sprite-direct"
+version = "0.1.0"
+description = "Client library for the sprite-direct Emacs server wire protocol"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Sam Kleinman", email = "sam@casaphq.com" },
+]
+keywords = ["emacs", "server", "daemon", "sprite"]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/tychoish/sprite"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sprite_direct"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

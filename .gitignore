@@ -4,3 +4,9 @@ sprite-pkg.el
 
 # Go
 /sprite
+
+# Python
+python/.venv/
+python/.pytest_cache/
+python/.coverage
+python/*.egg-info/
