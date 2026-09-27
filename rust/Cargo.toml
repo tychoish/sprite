@@ -6,6 +6,13 @@ description = "Client library for the sprite-direct Emacs server wire protocol"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/tychoish/sprite"
 keywords = ["emacs", "server", "protocol"]
+# Micro-benchmarks are for local/CI use only, never for distribution:
+# criterion pulls in a nontrivial dependency tree that consumers of
+# this crate should never see (dev-dependencies already aren't part of
+# a consumer's resolved graph, since Cargo strips them for published
+# crates -- this `exclude` additionally keeps the benches/ *source*
+# itself out of the published tarball).
+exclude = ["/benches"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
@@ -15,10 +22,15 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync"], o
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+criterion = "0.5"
 
 [features]
 cli-example = ["clap"]
 async = ["dep:tokio"]
+
+[[bench]]
+name = "eval_bench"
+harness = false
 
 [[example]]
 name = "sprite-cli"
