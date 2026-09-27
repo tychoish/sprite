@@ -133,19 +133,37 @@ Do NOT build: a full Lisp reader, fleet-level dispatch, non-blocking
 APIs beyond what the language gives for free (see below), or a shared
 subprocess helper.
 
-## Async policy (per language, do not deviate)
+## Async policy (per language)
 
-- Python: ship blocking `eval_blocking` as primary/required. `asyncio`
-  variant is optional/deferred — do not build it unless time remains
-  after the blocking path + tests are solid.
-- JavaScript: ship the natural Promise-based `evalBlocking` as the one
-  and only API (Node's `net` is already async-native) — do not fake a
-  synchronous variant.
-- Go: blocking `EvalBlocking` only. Document (README comment) that
-  concurrent dispatch is "call this in its own goroutine" — no second
-  API.
-- Rust: sync/std-only `eval_blocking` in the default feature set. Do
-  not add a `tokio`/async feature.
+*Superseded by the cross-language async/future client API plan
+(denote `7a4d2`): this MVP-era policy no longer holds for Python, Go,
+and Rust. It is kept here, corrected in place, rather than deleted,
+since it is still the authoritative statement of each language's async
+surface.*
+
+- Python: ships blocking `eval_blocking` (unchanged) plus a
+  thread-pool-backed `eval_non_blocking`/`resume_future`
+  (`sprite_direct.async_`) returning a `concurrent.futures.Future`,
+  and a thin `asyncio` wrapper (`sprite_direct.aio`).
+- JavaScript: still the natural Promise-based `evalBlocking` as the
+  one and only API (Node's `net` is already async-native) — do not fake
+  a synchronous variant, and do not add a second "async" entry point;
+  see `js/README.md`'s fan-out example.
+- Go: `EvalBlocking` is unchanged; `protocol.EvalAsync`/`Resume`
+  (`go/protocol/async.go`) add a `*Handle` (`Token`/`Poll`/`Wait`) for
+  callers who want a non-blocking handle instead of hand-rolling their
+  own goroutine.
+- Rust: sync/std-only `eval_blocking` remains the default-feature API;
+  a new optional `async` Cargo feature (`dep:tokio`, minimal features)
+  adds `eval_non_blocking`/`resume_future`/`AsyncHandle`
+  (`rust/src/async_eval.rs`), built on `eval_blocking` via
+  `tokio::task::spawn_blocking` rather than a parallel async-native
+  socket implementation.
+
+All four languages' non-blocking APIs are start/poll wrappers around
+the daemon-side `sprite-async-start`/`sprite-async-poll` token
+registry (`sprite-async.el`, repo root) — reached entirely through the
+existing `-eval` wire command, no new wire-protocol message type.
 
 ## Testing
 
