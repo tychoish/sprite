@@ -57,3 +57,10 @@ Live-daemon integration tests against a real `emacs --daemon` are a
 follow-up — no Emacs daemon is assumed available in this sandbox. The
 socket-opening step in `src/conn.js` (`openSocket`) is kept as a small
 seam for that future work.
+
+## Examples
+
+- `examples/list-buffers.js`: list all buffer names, one per line — `node examples/list-buffers.js <target>`
+- `examples/save-all-buffers.js`: save all buffers, confirming with `buffers saved` — `node examples/save-all-buffers.js <target>`
+- `examples/open-frame.js`: reproduce `sprite-open-frame` by invoking `emacsclient --no-wait --create-frame` directly (not the socket protocol) — `node examples/open-frame.js <socket-name>`
+- `examples/call-with-args.js`: build `(FUNC arg1 arg2 ...)` from a function name and a JSON args array and print the raw result — `node examples/call-with-args.js <target> <func-name> <json-args-array>`
