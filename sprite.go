@@ -3,11 +3,12 @@
 // the sprite-direct Emacs server wire protocol (see
 // fixtures/CONTRACT.md at the repo root for the protocol spec).
 //
-// EvalBlocking (via (*Client).Eval) is the only evaluation API this
-// library provides. It blocks for the duration of one connect-send
-// -receive round trip. Callers who want concurrent dispatch should run
-// it in their own goroutine -- this library intentionally does not
-// offer a second, non-blocking API.
+// EvalBlocking (via (*Client).Eval) blocks for the duration of one
+// connect-send-receive round trip. Callers who want a non-blocking
+// handle instead of hand-rolling their own goroutine can use
+// protocol.EvalAsync/Resume (see go/protocol/async.go), which return a
+// *protocol.Handle backed by the daemon-side sprite-async-start/
+// sprite-async-poll token registry.
 //
 // Build forms with go/lisp (Sym, Str, Int, Float, List, NewList,
 // Quote, Print) and configure calls with go/protocol's Option

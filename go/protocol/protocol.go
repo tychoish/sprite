@@ -169,14 +169,27 @@ type Config struct {
 	// Timeout, if non-zero, bounds the dial and the full round trip.
 	Timeout time.Duration
 
-	// Dial, if set, overrides the default connection strategy. This is
-	// the seam for future live-daemon integration tests (see
-	// fixtures/CONTRACT.md's Testing section): substitute a fake
-	// net.Conn without touching the request/response logic.
-	//
-	// TODO(live-daemon-integration): exercise this seam against a real
-	// `emacs --daemon` once one is available in the test environment.
+	// Dial, if set, overrides the default connection strategy: this is
+	// the seam unit tests use to substitute a fake net.Conn without
+	// touching the request/response logic (see fixtures/CONTRACT.md's
+	// Testing section, and go/protocol/async_test.go's
+	// fakeAsyncDaemon). Live-daemon integration tests (see
+	// integration_test.go) leave it unset, dialing a real `emacs
+	// --daemon` instead.
 	Dial func(network, address string) (net.Conn, error)
+
+	// TTL, if non-nil, is passed as the TTL-SECONDS argument to
+	// sprite-async-start (see async.go). Left unset, no TTL argument is
+	// sent at all -- the daemon applies its own default.
+	TTL *time.Duration
+
+	// PollIntervalFunc, if non-nil, is called by a Handle's background
+	// poll loop (see async.go) before each poll after the first, given
+	// the elapsed time since the loop started, to compute the delay
+	// before the next poll. Left nil, the loop falls back to an
+	// exponential backoff starting at 50ms, doubling each poll, capped
+	// at 2s.
+	PollIntervalFunc func(elapsed time.Duration) time.Duration
 }
 
 // Option configures a Config for EvalBlocking.
@@ -265,11 +278,9 @@ func defaultDial(network, address string) (net.Conn, error) {
 // empty-string result are indistinguishable at this layer; callers who
 // need to distinguish them can use ParseResponse directly.
 //
-// EvalBlocking is the only API this library provides for evaluation: it
-// blocks for the duration of the round trip. Callers who want
-// concurrent dispatch should call it from their own goroutine; this
-// library does not provide a second, non-blocking API (see
-// fixtures/CONTRACT.md's Async policy).
+// EvalAsync (see async.go) is available for callers who want a
+// non-blocking handle instead of a synchronous call; EvalBlocking
+// itself is unchanged.
 func EvalBlocking(rawTarget string, form lisp.Sexp, opts ...Option) (string, error) {
 	var cfg Config
 	if err := opt.Join(opts...).Apply(&cfg); err != nil {
