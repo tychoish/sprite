@@ -21,8 +21,13 @@
 ;;     otherwise spawns a shared daemon for the suite and reuses it across all
 ;;     buffer tests.  Tests skip when no daemon can be made ready.
 ;;
-;; Both suites require a writable `server-socket-dir'.  They are intentionally
-;; omitted from the normal unit-test batch run and must be invoked explicitly.
+;; Both suites require a writable `server-socket-dir' and spawn real
+;; `emacs --daemon' subprocesses; no special sandboxing or CI access is
+;; needed beyond a writable socket dir and an `emacs' binary on PATH.
+;; They are kept in their own file and invoked explicitly (as a
+;; separate CI job/step) rather than mixed into the fast unit-test
+;; batch run, since each test takes on the order of a second to spawn
+;; and tear down a daemon.
 ;;
 
 ;;; Code:
@@ -32,6 +37,7 @@
 (require 'seq)
 (require 'map)
 (require 'subr-x)
+(require 'server)
 (require 'sprite-direct)
 
 (declare-function sprite--registry-all "sprite")
