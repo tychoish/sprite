@@ -37,6 +37,14 @@ Use `sprite.Quote(form)` for `(quote form)`.
 
 A minimal runnable example lives in `examples/sprite-example`.
 
+## Examples
+
+- `examples/sprite-example`: evaluate `(+ 1 2)` and print the result — `go run ./examples/sprite-example <target>`
+- `examples/sprite-example-list-buffers`: list all buffer names, one per line — `go run ./examples/sprite-example-list-buffers <target>`
+- `examples/sprite-example-save-buffers`: save all buffers, confirming with `buffers saved` — `go run ./examples/sprite-example-save-buffers <target>`
+- `examples/sprite-example-open-frame`: reproduce `sprite-open-frame` by invoking `emacsclient --no-wait --create-frame` directly (not the socket protocol) — `go run ./examples/sprite-example-open-frame <socket-name>`
+- `examples/sprite-example-call`: build `(FUNC arg1 arg2 ...)` from a function name and a JSON args array and print the raw result — `go run ./examples/sprite-example-call <target> <func-name> <json-args-array>`
+
 ## Testing
 
 Unit tests in `go/lisp` and `go/protocol` load
