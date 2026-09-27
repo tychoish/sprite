@@ -46,9 +46,11 @@
 (require 'subr-x)
 (require 'map)
 (require 'sprite-direct)
+(require 'sprite-session)
 (require 'savehist)
 
 (declare-function annotated-completing-read "annotated-completing-read")
+(declare-function sprite-list "sprite-list")
 
 ;; server.el variables; server.el is loaded by any running daemon but may be
 ;; absent in batch/test contexts.
@@ -406,6 +408,21 @@ For each provisional entry whose :parent matches `sprite-instance-name':
 
 ;;;; Communication and eval
 
+(defcustom sprite-communication-backend 'emacsclient
+  "Transport used for sprite eval calls.
+`emacsclient' shells out to the emacsclient binary (default, matches
+current behaviour).  `direct' speaks the server wire protocol over a
+socket via sprite-direct.el, with no subprocess."
+  :type '(choice (const emacsclient) (const direct))
+  :group 'sprite)
+
+(defcustom sprite-communication-fallback nil
+  "When non-nil, retry with the other backend after a failed direct call.
+Only applies when `sprite-communication-backend' is `direct': a failed
+socket connection retries once via emacsclient before giving up."
+  :type 'boolean
+  :group 'sprite)
+
 (defconst sprite--log-time-format "%H:%M:%S"
   "Format string for timestamps in sprite log buffers.")
 
@@ -495,6 +512,11 @@ Unless NO-LOG is non-nil, logs the exchange and updates last-contact."
   (pop-to-buffer (sprite--log-buffer-name name)))
 
 ;;;; Lifecycle
+
+(defcustom sprite-startup-timeout 30
+  "Seconds to wait for a newly spawned sprite server to accept connections."
+  :type 'integer
+  :group 'sprite)
 
 (defun sprite--resolve-name (name)
   "Resolve NAME to a full sprite name.
@@ -631,23 +653,6 @@ Each candidate is annotated with index and uptime.  Specify PROMPT text."
     (when-let* ((s (sprite--registry-get full-name)))
       (setf (sprite-last-contact s) (current-time)))))
 
-;;;; Communication
-
-(defcustom sprite-communication-backend 'emacsclient
-  "Transport used for sprite eval calls.
-`emacsclient' shells out to the emacsclient binary (default, matches
-current behaviour).  `direct' speaks the server wire protocol over a
-socket via sprite-direct.el, with no subprocess."
-  :type '(choice (const emacsclient) (const direct))
-  :group 'sprite)
-
-(defcustom sprite-communication-fallback nil
-  "When non-nil, retry with the other backend after a failed direct call.
-Only applies when `sprite-communication-backend' is `direct': a failed
-socket connection retries once via emacsclient before giving up."
-  :type 'boolean
-  :group 'sprite)
-
 (defun sprite--direct-target (full-name)
   "Return the sprite-direct TARGET string for FULL-NAME.
 When the sprite runs with `server-use-tcp', reads its TCP server file
@@ -725,11 +730,6 @@ A sprite is \"active\" if it was contacted within this many seconds."
 
 (defcustom sprite-max-count 4
   "Maximum number of sprite `sprite-get-or-create-next' will spawn."
-  :type 'integer
-  :group 'sprite)
-
-(defcustom sprite-startup-timeout 30
-  "Seconds to wait for a newly spawned sprite server to accept connections."
   :type 'integer
   :group 'sprite)
 
