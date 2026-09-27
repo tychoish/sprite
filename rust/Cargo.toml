@@ -9,13 +9,16 @@ keywords = ["emacs", "server", "protocol"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync"], optional = true }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
 cli-example = ["clap"]
+async = ["dep:tokio"]
 
 [[example]]
 name = "sprite-cli"

@@ -7,9 +7,9 @@
 //! connect-send-receive-parse call ([`eval_blocking`]) over either a
 //! Unix domain socket or a TCP `HOST:PORT:KEY` target.
 //!
-//! Per the CONTRACT's async policy for Rust, only a sync/std-only
-//! `eval_blocking` ships in this crate; no `tokio`/async feature is
-//! provided.
+//! A sync/std-only `eval_blocking` ships by default. An optional
+//! `async` Cargo feature additionally provides a tokio-backed
+//! non-blocking eval built on top of it (see [`async_eval`]).
 //!
 //! # Connection targets
 //!
@@ -35,6 +35,10 @@
 //! step is isolated behind [`Target::connect`] specifically so that
 //! seam is easy to substitute or exercise separately later.
 
+#[cfg(feature = "async")]
+pub mod async_eval;
+#[cfg(feature = "async")]
+pub(crate) mod async_wire;
 pub mod protocol;
 pub mod sexp;
 
@@ -61,6 +65,17 @@ pub enum SpriteError {
     /// A TCP target was given with no auth key, either embedded in the
     /// target string or passed explicitly.
     MissingAuthKey,
+    /// The daemon-side async registry rejected the form with an error;
+    /// the string is the human-readable message from `(:rejected ...)`.
+    AsyncRejected(String),
+    /// The daemon-side async registry has no record of the given token
+    /// (either never registered or expired via idle timeout).
+    AsyncUnknownToken(String),
+    /// A background task (spawned via `tokio::task::spawn` or
+    /// `spawn_blocking`) panicked; the string is the panic's `Display`
+    /// or debug rendering, since a `JoinError` payload cannot otherwise
+    /// cross this crate's error type boundary.
+    TaskPanicked(String),
 }
 
 impl fmt::Display for SpriteError {
@@ -70,6 +85,11 @@ impl fmt::Display for SpriteError {
             SpriteError::Eval(msg) => write!(f, "eval error: {msg}"),
             SpriteError::Empty => write!(f, "empty response (no print/error line found)"),
             SpriteError::MissingAuthKey => write!(f, "missing auth key for TCP target"),
+            SpriteError::AsyncRejected(msg) => write!(f, "async form rejected: {msg}"),
+            SpriteError::AsyncUnknownToken(token) => {
+                write!(f, "async token unknown or expired: {token}")
+            }
+            SpriteError::TaskPanicked(msg) => write!(f, "background task panicked: {msg}"),
         }
     }
 }
