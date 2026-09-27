@@ -64,3 +64,10 @@ follow-up — no daemon is assumed available in this sandbox. The
 socket-opening step is isolated behind a single seam
 (`Target::connect` in `src/lib.rs`) specifically so that's easy to add
 later.
+
+## Examples
+
+- `examples/list_buffers.rs`: list all buffer names, one per line — `cargo run --example list_buffers --features cli-example -- <target>`
+- `examples/save_all_buffers.rs`: save all buffers, confirming with `buffers saved` — `cargo run --example save_all_buffers --features cli-example -- <target>`
+- `examples/open_frame.rs`: reproduce `sprite-open-frame` by invoking `emacsclient --no-wait --create-frame` directly (not the socket protocol) — `cargo run --example open_frame --features cli-example -- <socket-name>`
+- `examples/call_with_args.rs`: build `(FUNC arg1 arg2 ...)` from a function name and a JSON args array and print the raw result — `cargo run --example call_with_args --features cli-example -- <target> <func> '<json-args-array>'`

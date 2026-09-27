@@ -35,3 +35,19 @@ harness = false
 [[example]]
 name = "sprite-cli"
 required-features = ["cli-example"]
+
+[[example]]
+name = "list_buffers"
+required-features = ["cli-example"]
+
+[[example]]
+name = "save_all_buffers"
+required-features = ["cli-example"]
+
+[[example]]
+name = "open_frame"
+required-features = ["cli-example"]
+
+[[example]]
+name = "call_with_args"
+required-features = ["cli-example"]
