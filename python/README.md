@@ -22,3 +22,10 @@ tests instead consume the shared `fixtures/protocol.json` conformance
 fixtures.
 
 Run tests with `pytest` from this directory.
+
+## Examples
+
+- `examples/list_buffers.py`: list all buffer names, one per line — `python3 examples/list_buffers.py <target>`
+- `examples/save_all_buffers.py`: save all buffers, confirming with `buffers saved` — `python3 examples/save_all_buffers.py <target>`
+- `examples/open_frame.py`: reproduce `sprite-open-frame` by invoking `emacsclient --no-wait --create-frame` directly (not the socket protocol) — `python3 examples/open_frame.py <socket-name>`
+- `examples/call_with_args.py`: build `(FUNC arg1 arg2 ...)` from a function name and a JSON args array and print the raw result — `python3 examples/call_with_args.py <target> <func-name> <json-args-array>`
