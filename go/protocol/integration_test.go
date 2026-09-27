@@ -11,7 +11,9 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -70,27 +72,10 @@ func TestEvalBlockingAgainstLiveDaemon(t *testing.T) {
 	}
 }
 
-func isEvalError(err error, target **protocol.EvalError) bool {
-	e, ok := err.(*protocol.EvalError)
-	if !ok {
-		return false
-	}
-	*target = e
-	return true
-}
-
-// liveDaemonSocket returns the SPRITE_TEST_SOCKET path, or skips the
-// calling test if it isn't set. See CI's .github/workflows/test.yml,
-// which loads sprite-async.el into the test daemon before running
-// -run LiveDaemon tests.
-func liveDaemonSocket(t *testing.T) string {
-	t.Helper()
-	sock := os.Getenv("SPRITE_TEST_SOCKET")
-	if sock == "" {
-		t.Skip("SPRITE_TEST_SOCKET not set; skipping live-daemon integration test")
-	}
-	return sock
-}
+// isEvalError, liveDaemonSocket, requireEmacsBinary, onceCleanup,
+// waitForPath, spawnDisposableUnixDaemon, tcpDaemon, and
+// spawnDisposableTCPDaemon are shared with timeout_test.go and defined
+// in helpers_test.go.
 
 func TestEvalAsyncHappyPathLiveDaemon(t *testing.T) {
 	sock := liveDaemonSocket(t)
@@ -222,5 +207,189 @@ func TestResumeAfterDisconnectLiveDaemon(t *testing.T) {
 	}
 	if got != "99" {
 		t.Errorf("got %q, want %q", got, "99")
+	}
+}
+
+// --- Extended error-handling / transmission-fidelity case matrix ---
+//
+// The three cases below (wrong-type-argument, user-error, large value)
+// exercise the *existing* SPRITE_TEST_SOCKET daemon, same as the tests
+// above: none of them are destructive to the daemon. TCP and
+// kill-mid-response cases need their own disposable daemons (see
+// requireEmacsBinary/spawnDisposableUnixDaemon/spawnDisposableTCPDaemon
+// below) and are gated on the emacs binary being on PATH, independent of
+// whether SPRITE_TEST_SOCKET is set.
+
+func TestWrongTypeArgumentEvalLiveDaemon(t *testing.T) {
+	sock := liveDaemonSocket(t)
+
+	// (+ 1 "a") is a genuine wrong-type-argument error, distinct in
+	// message shape from the unbound-variable case above -- this
+	// confirms the error path decodes whatever message text Emacs
+	// actually sends, rather than being hardcoded to one string.
+	form := lisp.NewList(lisp.Sym("+"), lisp.Int(1), lisp.Str("a"))
+	_, err := protocol.EvalBlocking(sock, form)
+	if err == nil {
+		t.Fatal("expected a wrong-type-argument eval error")
+	}
+	var evalErr *protocol.EvalError
+	if !isEvalError(err, &evalErr) {
+		t.Fatalf("expected *protocol.EvalError, got %T: %v", err, err)
+	}
+	if evalErr.Message == "" {
+		t.Fatal("expected a non-empty decoded error message")
+	}
+}
+
+func TestUserErrorEvalLiveDaemon(t *testing.T) {
+	sock := liveDaemonSocket(t)
+
+	// (user-error "boom") is a genuine user-error, which must surface
+	// via the same -error/EvalError path as any other eval error, not
+	// be silently swallowed or routed differently.
+	form := lisp.NewList(lisp.Sym("user-error"), lisp.Str("boom"))
+	_, err := protocol.EvalBlocking(sock, form)
+	if err == nil {
+		t.Fatal("expected a user-error eval error")
+	}
+	var evalErr *protocol.EvalError
+	if !isEvalError(err, &evalErr) {
+		t.Fatalf("expected *protocol.EvalError, got %T: %v", err, err)
+	}
+	if evalErr.Message == "" || !strings.Contains(evalErr.Message, "boom") {
+		t.Errorf("got message %q, want it to contain %q", evalErr.Message, "boom")
+	}
+}
+
+func TestLargeValueEvalLiveDaemon(t *testing.T) {
+	sock := liveDaemonSocket(t)
+
+	// A 5000-byte string is well beyond Emacs's server-msg-size
+	// (1024), forcing the server to split the -print-nonl reply across
+	// multiple continuation lines. 120 is the char code for ?x.
+	form := lisp.NewList(lisp.Sym("make-string"), lisp.Int(5000), lisp.Int(120))
+	got, err := protocol.EvalBlocking(sock, form)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// pp/prin1-quotes the string, so assert on length and content
+	// rather than an exact literal (see task notes on quoting).
+	xCount := strings.Count(got, "x")
+	if xCount != 5000 {
+		t.Errorf("got %d 'x' characters in result, want 5000 (result length %d)", xCount, len(got))
+	}
+	if !strings.HasPrefix(got, `"x`) || !strings.HasSuffix(got, `x"`) {
+		t.Errorf("got %q (truncated), want a quoted string of 5000 x's", truncateForLog(got))
+	}
+}
+
+func truncateForLog(s string) string {
+	if len(s) > 80 {
+		return s[:80] + "...(truncated)"
+	}
+	return s
+}
+
+func TestTCPTargetNoKeyRejectedBeforeDialingLiveDaemon(t *testing.T) {
+	daemon, cleanup := spawnDisposableTCPDaemon(t, uniqueDaemonName("sprite-tcp-nokey"))
+	defer cleanup()
+
+	// Deliberately omit the key: a TCP target the daemon requires a
+	// real auth key for must be rejected client-side before any dial
+	// is attempted -- confirmed here against a live, key-configured TCP
+	// daemon rather than only a fake dialer.
+	target := daemon.host + ":" + daemon.port
+	_, err := protocol.EvalBlocking(target, lisp.Sym("t"))
+	if err == nil {
+		t.Fatal("expected an error for a TCP target with no key")
+	}
+	if !strings.Contains(err.Error(), "key") {
+		t.Errorf("got error %v, want it to mention the missing key", err)
+	}
+}
+
+func TestTCPTargetWithKeyLiveDaemon(t *testing.T) {
+	daemon, cleanup := spawnDisposableTCPDaemon(t, uniqueDaemonName("sprite-tcp-key"))
+	defer cleanup()
+
+	target := daemon.host + ":" + daemon.port
+	got, err := protocol.EvalBlocking(target, lisp.NewList(lisp.Sym("+"), lisp.Int(1), lisp.Int(2)), protocol.WithKey(daemon.key))
+	if err != nil {
+		t.Fatalf("unexpected error evaluating over TCP: %v", err)
+	}
+	if got != "3" {
+		t.Errorf("got %q, want %q", got, "3")
+	}
+}
+
+// stopThenKillAfterWriteConn wraps a real net.Conn. Before the first
+// Write, it SIGSTOPs the daemon process (pid); after that Write
+// returns, it SIGKILLs it (via killFn, called exactly once).
+//
+// SIGSTOP-ing before the write, rather than merely killing immediately
+// after it, removes what would otherwise be a timing race: a plain
+// kill immediately after Write can still lose (verified empirically) if
+// Emacs's own event loop happens to get scheduled first and read the
+// bytes before the kill syscall runs, in which case the kernel sees an
+// empty receive buffer at process-death time and delivers an ordinary
+// clean EOF -- indistinguishable from the server successfully
+// finishing and closing the connection (see ParseResponse/readResponse:
+// no -print/-error line found plus a clean EOF is treated as a
+// legitimate empty result, not an error). A process that is SIGSTOPed
+// *cannot* read no matter how much wall-clock time elapses, so the
+// request bytes are guaranteed to still be sitting unread in the
+// kernel's receive buffer once SIGKILL is delivered -- and an unread
+// receive buffer at close time is what causes the kernel to send RST
+// instead of FIN, which is what actually produces a detectable
+// connection-reset error client-side. SIGKILL still terminates a
+// stopped process immediately (the kernel treats SIGKILL specially,
+// waking a stopped process just to kill it).
+type stopThenKillAfterWriteConn struct {
+	net.Conn
+	pid    int
+	once   sync.Once
+	killFn func()
+}
+
+func (c *stopThenKillAfterWriteConn) Write(p []byte) (int, error) {
+	_ = syscall.Kill(c.pid, syscall.SIGSTOP)
+	n, err := c.Conn.Write(p)
+	c.once.Do(c.killFn)
+	return n, err
+}
+
+func TestDaemonKilledMidResponseLiveDaemon(t *testing.T) {
+	sockPath, cmd, cleanup := spawnDisposableUnixDaemon(t, uniqueDaemonName("sprite-kill"))
+	defer cleanup()
+
+	dial := func(network, address string) (net.Conn, error) {
+		conn, err := net.Dial(network, address)
+		if err != nil {
+			return nil, err
+		}
+		return &stopThenKillAfterWriteConn{Conn: conn, pid: cmd.Process.Pid, killFn: cleanup}, nil
+	}
+
+	type result struct {
+		val string
+		err error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		form := lisp.NewList(lisp.Sym("progn"),
+			lisp.NewList(lisp.Sym("sleep-for"), lisp.Int(2)),
+			lisp.Int(1),
+		)
+		val, err := protocol.EvalBlocking(sockPath, form, protocol.WithDialer(dial), protocol.WithTimeout(10*time.Second))
+		resultCh <- result{val, err}
+	}()
+
+	select {
+	case r := <-resultCh:
+		if r.err == nil {
+			t.Fatalf("expected a connection/IO error after killing the daemon mid-response, got value %q", r.val)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for EvalBlocking to return after the daemon was killed (hang)")
 	}
 }
