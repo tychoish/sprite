@@ -30,6 +30,27 @@ response string, or `null` if the server returned no result at all; it
 rejects with a `SpriteEvalError` on a `-error` response or a missing
 TCP auth key.
 
+For concurrent fan-out, call `evalBlocking` multiple times and await
+the results together with `Promise.all`:
+
+```js
+import { evalBlocking } from "sprite-direct";
+
+const targets = ["worker-a.socket", "worker-b.socket", "worker-c.socket"];
+const results = await Promise.all(
+  targets.map((target) => evalBlocking(target, "(+ 1 2)")),
+);
+```
+
+Unlike the Python, Go, and Rust `sprite-direct` client libraries, this
+one has no separate non-blocking/future-style entry point and won't
+gain one: `evalBlocking` is already Promise-based end-to-end, since
+Node's `net` module is async-native, so it already is the non-blocking
+API rather than a wrapper around a synchronous call underneath. To run
+evaluations concurrently, just issue several `evalBlocking` calls at
+once and await them together, as above, instead of looking for a
+distinct async entry point.
+
 Run tests with `npm test` (from this directory) or `node --test test/`.
 
 Live-daemon integration tests against a real `emacs --daemon` are a
