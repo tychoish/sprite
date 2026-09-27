@@ -15,6 +15,9 @@ authors = [
 keywords = ["emacs", "server", "daemon", "sprite"]
 dependencies = []
 
+[project.optional-dependencies]
+bench = ["pytest-benchmark"]
+
 [project.urls]
 Homepage = "https://github.com/tychoish/sprite"
 
