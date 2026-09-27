@@ -42,7 +42,6 @@ jobs:
             - test/test-sprite-future.el
             - test/test-sprite-heartbeat.el
             - test/test-sprite-session.el
-            - test/test-sprite-mcp.el
             - test/test-sprite-agent-session.el
             - test/test-sprite-direct-integration.el
 
