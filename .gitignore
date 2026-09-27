@@ -10,3 +10,6 @@ python/.venv/
 python/.pytest_cache/
 python/.coverage
 python/*.egg-info/
+
+# Node
+js/node_modules/
