@@ -33,25 +33,9 @@ jobs:
 
       - name: Run Tests
         uses: tychoish/elisp-ci@v0.1.0
-        with:
-          test-files: |
-            - test/test-sprite.el
-            - test/test-sprite-direct.el
-            - test/test-sprite-direct-gen.el
-            - test/test-sprite-fleet.el
-            - test/test-sprite-future.el
-            - test/test-sprite-heartbeat.el
-            - test/test-sprite-system.el
-            - test/test-sprite-session.el
-            - test/test-sprite-direct-integration.el
 
-  # Unit + live-daemon integration tests for the four sprite-direct
-  # client libraries (python/, js/, go, rust/) and the Go CLI
-  # (cmd/sprite). Runs on a plain ubuntu-latest runner rather than the
-  # silex/emacs container above, since it needs Python/Node/Go/Rust
-  # toolchains as well as Emacs -- spawning `emacs --daemon` here needs
-  # no special access beyond a writable socket dir and an `emacs`
-  # binary on PATH (verified locally; nothing container-specific).
+  # Unit + live-daemon integration tests for the sprite-direct client
+  # libraries (python/, js/, go, rust/) and the Go CLI (cmd/sprite).
   sprite-clients:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -97,10 +81,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/sprite-xdg-runtime"
           chmod 700 "$RUNNER_TEMP/sprite-xdg-runtime"
-          # --eval loads sprite-async.el (repo root) into the daemon so
-          # live-daemon async tests can reach sprite-async-start/-poll;
-          # the daemon has no other init file (--no-init-file
-          # --no-site-file), so this is the only way it gets loaded.
+          # loads sprite-async.el into the no-init-file daemon so the async tests can reach it
           XDG_RUNTIME_DIR="$RUNNER_TEMP/sprite-xdg-runtime" \
             emacs --daemon=ci.0.sprite --no-init-file --no-site-file \
             --eval "(load-file \"$GITHUB_WORKSPACE/sprite-async.el\")" &
@@ -135,11 +116,7 @@ jobs:
           go run ./cmd/sprite call ci.0.sprite '+' --args '[1,2]'
           go run ./cmd/sprite eval ci.0.sprite '(+ 3 4)'
 
-      # Timeout / hung-daemon suites each spawn and tear down their own
-      # disposable emacs --fg-daemon (see fixtures/CONTRACT.md's sibling
-      # test files) -- they don't touch ci.0.sprite/SPRITE_TEST_SOCKET,
-      # so they can run alongside the integration tests above rather
-      # than needing their own job.
+      # each timeout suite spawns its own disposable daemon, so these can run alongside the integration tests
       - name: Timeout tests -- Python
         working-directory: python
         run: |
@@ -157,21 +134,9 @@ jobs:
         working-directory: rust
         run: cargo test --test timeout -- --nocapture
 
-  # Native, per-language micro-benchmarks (go test -bench, pytest
-  # -benchmark, a perf_hooks script, and criterion) for EvalBlocking vs.
-  # an `emacsclient --eval` subprocess baseline. Each language uses its
-  # own idiomatic tool rather than a shared cross-language driver, since
-  # these numbers are for tracking each language's own per-call cost
-  # over time, not a strict cross-language comparison.
-  #
-  # Runs on every push to main, throttled to at most once per UTC day
-  # via the cache-marker below, plus always on a manual
-  # workflow_dispatch. Kept out of the push/PR-gating sprite-clients job
-  # above: wall-clock numbers on a shared GitHub-hosted runner are too
-  # noisy to treat as a pass/fail gate (see plan 7a4d1's "ANSWERED" open
-  # question on this), so this job never blocks a merge -- each
-  # benchmark step uses `continue-on-error` so one language's flake
-  # doesn't hide the others' reports.
+  # Per-language micro-benchmarks (EvalBlocking vs. an `emacsclient
+  # --eval` subprocess baseline), throttled to once per UTC day on push;
+  # never gates a merge, so each benchmark step uses continue-on-error.
   sprite-bench:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -185,13 +150,6 @@ jobs:
         id: date
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # Once-per-day throttle for push events only: the cache key is
-      # date-only (no run id), so the first push of a UTC day misses and
-      # every later push that same day hits the same key and skips the
-      # run below. workflow_dispatch always bypasses this (see the `if`
-      # on later steps). continue-on-error means a cache-service hiccup
-      # fails open -- worst case the benchmark runs an extra time that
-      # day, never that it silently stops running altogether.
       - name: Once-per-day throttle marker
         id: throttle
         if: github.event_name == 'push'
@@ -201,35 +159,41 @@ jobs:
           path: .bench-ran
           key: sprite-bench-ran-${{ steps.date.outputs.today }}
 
-      - name: Skip reason
-        if: github.event_name == 'push' && steps.throttle.outputs.cache-hit == 'true'
-        run: echo "Benchmark already ran today (UTC); skipping until tomorrow or a manual workflow_dispatch." | tee "$GITHUB_STEP_SUMMARY"
+      - name: Determine whether to run
+        id: should-run
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ steps.throttle.outputs.cache-hit }}" != "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Benchmark already ran today (UTC); skipping until tomorrow or a manual workflow_dispatch." | tee "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Mark benchmark as run today
         if: github.event_name == 'push' && steps.throttle.outputs.cache-hit != 'true'
         run: touch .bench-ran
 
       - name: Install Emacs
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         run: sudo apt-get update && sudo apt-get install -y emacs-nox
 
       - uses: actions/setup-python@v5
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         with:
           python-version: "3.x"
       - uses: actions/setup-node@v5
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         with:
           node-version: "lts/*"
       - uses: actions/setup-go@v5
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         with:
           go-version-file: go.mod
       - uses: dtolnay/rust-toolchain@stable
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
 
       - name: Spawn a disposable daemon
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/sprite-bench-xdg"
           chmod 700 "$RUNNER_TEMP/sprite-bench-xdg"
@@ -244,7 +208,7 @@ jobs:
           echo "SPRITE_TEST_SOCKET=$sock" >> "$GITHUB_ENV"
 
       - name: Benchmark -- Go
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         continue-on-error: true
         run: |
           {
@@ -255,7 +219,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Benchmark -- Python
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         continue-on-error: true
         working-directory: python
         run: |
@@ -270,7 +234,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Benchmark -- JavaScript
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         continue-on-error: true
         working-directory: js
         run: |
@@ -282,7 +246,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Benchmark -- Rust
-        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        if: steps.should-run.outputs.run == 'true'
         continue-on-error: true
         working-directory: rust
         run: |

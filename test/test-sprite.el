@@ -531,7 +531,7 @@ and `sprite-communication-fallback' is non-nil."
   (let ((s (sprite--make :name "work.0.render" :idx 0
                          :parent "work" :unique-name "render"))
         (sprite-communication-backend 'direct))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (sprite-list-info)
       (let ((buf (get-buffer "*Sprite Info: work.0.render*")))
         (unwind-protect
@@ -574,21 +574,21 @@ and `sprite-communication-fallback' is non-nil."
 (ert-deftest sprite/known-dead-p-nil-when-unchecked ()
   "`sprite-list--known-dead-p' returns nil when running-status is nil."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work")))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should-not (sprite-list--known-dead-p)))))
 
 (ert-deftest sprite/known-dead-p-nil-when-running ()
   "`sprite-list--known-dead-p' returns nil when sprite is known running."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                          :running-status 'running)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should-not (sprite-list--known-dead-p)))))
 
 (ert-deftest sprite/known-dead-p-true-when-dead ()
   "`sprite-list--known-dead-p' returns t when sprite is known dead."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                          :running-status 'dead)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should (sprite-list--known-dead-p)))))
 
 (ert-deftest sprite/list-check-sets-running-status ()
@@ -597,7 +597,7 @@ and `sprite-communication-fallback' is non-nil."
     (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                            :unique-name "render")))
       (sprite--registry-put s)
-      (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s))
+      (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s))
                 ((symbol-function 'sprite--running-p) (lambda (_) t))
                 ((symbol-function 'sprite-list-refresh) #'ignore))
         (sprite-list-check)
@@ -609,7 +609,7 @@ and `sprite-communication-fallback' is non-nil."
     (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                            :unique-name "render")))
       (sprite--registry-put s)
-      (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s))
+      (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s))
                 ((symbol-function 'sprite--running-p) (lambda (_) nil))
                 ((symbol-function 'sprite-list-refresh) #'ignore))
         (sprite-list-check)
@@ -619,20 +619,20 @@ and `sprite-communication-fallback' is non-nil."
   "`sprite-list--can-open-frame-p' returns nil for a known-dead sprite."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                          :running-status 'dead)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should-not (sprite-list--can-open-frame-p)))))
 
 (ert-deftest sprite/can-open-frame-p-true-when-unchecked ()
   "`sprite-list--can-open-frame-p' returns t when running status is unknown."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work")))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should (sprite-list--can-open-frame-p)))))
 
 (ert-deftest sprite/can-open-frame-p-true-when-running ()
   "`sprite-list--can-open-frame-p' returns t when sprite is known running."
   (let ((s (sprite--make :name "work.0.render" :idx 0 :parent "work"
                          :running-status 'running)))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () s)))
+    (cl-letf (((symbol-function 'sprite-list--entry-at-point) (lambda () s)))
       (should (sprite-list--can-open-frame-p)))))
 
 ;;;; Transient key validation

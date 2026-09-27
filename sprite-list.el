@@ -150,10 +150,17 @@
   "Keymap for sprite info help buffers.
 Add context-specific bindings here.")
 
+(defun sprite-list--entry-at-point ()
+  "Return the tabulated-list entry ID at point, or nil.
+A thin, non-inlined wrapper around `tabulated-list-get-id' (a `defsubst'
+whose calls get inlined when this file is byte-compiled, which would
+otherwise make it impossible for tests to mock via `cl-letf')."
+  (tabulated-list-get-id))
+
 (defun sprite-list-info ()
   "Show a help-window detail buffer for the sprite at point."
   (interactive)
-  (when-let* ((s (tabulated-list-get-id))
+  (when-let* ((s (sprite-list--entry-at-point))
               (buf-name (format "*Sprite Info: %s*" (sprite-name s))))
     (with-help-window buf-name
       (princ (format "Sprite: %s\n\n" (sprite-name s)))
@@ -191,17 +198,17 @@ Add context-specific bindings here.")
 
 (defun sprite-list--sprite-at-point-p ()
   "Return non-nil if there is a managed sprite at point (not the parent row)."
-  (when-let* ((s (tabulated-list-get-id)))
+  (when-let* ((s (sprite-list--entry-at-point)))
     (not (null (sprite-idx s)))))
 
 (defun sprite-list--log-exists-at-point-p ()
   "Return non-nil if a log buffer exists for the sprite at point."
-  (when-let* ((s (tabulated-list-get-id)))
+  (when-let* ((s (sprite-list--entry-at-point)))
     (get-buffer (sprite--log-buffer-name (sprite-name s)))))
 
 (defun sprite-list--known-dead-p ()
   "Return non-nil if the sprite at point has been checked and is not running."
-  (when-let* ((s (tabulated-list-get-id))
+  (when-let* ((s (sprite-list--entry-at-point))
               ((sprite-idx s)))
     (eq (sprite-running-status s) 'dead)))
 
@@ -214,7 +221,7 @@ True when point is on a sprite row that is not known to be dead."
 (defun sprite-list--sprite-at-point ()
   "Return the managed sprite struct at point, or signal `user-error'.
 Signals an error if point is on the parent-instance row."
-  (if-let* ((s (tabulated-list-get-id))
+  (if-let* ((s (sprite-list--entry-at-point))
             ((sprite-idx s)))
     s
     (user-error "No sprite at point")))
