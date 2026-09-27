@@ -1,0 +1,199 @@
+{
+  "$comment": "Language-neutral conformance fixtures for the sprite-direct wire protocol. Source of truth: sprite-direct.el. Every per-language client's unit test suite must consume this file verbatim rather than hand-copying these cases, so a fixed protocol bug in one language's test data is caught in all four.",
+  "encode_decode": {
+    "$comment": "decoded (raw Lisp-printed text) <-> encoded (wire form after server-quote-arg-style escaping). Table: & -> &&, - -> &-, space -> &_, newline -> &n. All other bytes pass through unchanged.",
+    "cases": [
+      {
+        "decoded": "",
+        "encoded": ""
+      },
+      {
+        "decoded": "hello",
+        "encoded": "hello"
+      },
+      {
+        "decoded": "hello world",
+        "encoded": "hello&_world"
+      },
+      {
+        "decoded": "a-b",
+        "encoded": "a&-b"
+      },
+      {
+        "decoded": "a&b",
+        "encoded": "a&&b"
+      },
+      {
+        "decoded": "line1\nline2",
+        "encoded": "line1&nline2"
+      },
+      {
+        "decoded": "(+ 1 2)",
+        "encoded": "(+&_1&_2)"
+      },
+      {
+        "decoded": "&-& \n",
+        "encoded": "&&&-&&&_&n"
+      }
+    ]
+  },
+  "sexp_print": {
+    "$comment": "Tagged-union sexp forms and their expected printed (Lisp reader syntax) output, BEFORE wire-protocol encoding is applied. Each 'form' node is {type: sym|str|int|float|list|quote, value: ...}, where list/quote values are themselves form nodes.",
+    "cases": [
+      {
+        "form": {
+          "type": "sym",
+          "value": "+"
+        },
+        "printed": "+"
+      },
+      {
+        "form": {
+          "type": "int",
+          "value": 1
+        },
+        "printed": "1"
+      },
+      {
+        "form": {
+          "type": "int",
+          "value": -3
+        },
+        "printed": "-3"
+      },
+      {
+        "form": {
+          "type": "float",
+          "value": 1.5
+        },
+        "printed": "1.5"
+      },
+      {
+        "form": {
+          "type": "str",
+          "value": "hello"
+        },
+        "printed": "\"hello\""
+      },
+      {
+        "form": {
+          "type": "str",
+          "value": "say \"hi\"\\"
+        },
+        "printed": "\"say \\\"hi\\\"\\\\\""
+      },
+      {
+        "form": {
+          "type": "list",
+          "value": [
+            {
+              "type": "sym",
+              "value": "+"
+            },
+            {
+              "type": "int",
+              "value": 1
+            },
+            {
+              "type": "int",
+              "value": 2
+            }
+          ]
+        },
+        "printed": "(+ 1 2)"
+      },
+      {
+        "form": {
+          "type": "quote",
+          "value": {
+            "type": "sym",
+            "value": "foo"
+          }
+        },
+        "printed": "(quote foo)"
+      },
+      {
+        "form": {
+          "type": "list",
+          "value": [
+            {
+              "type": "sym",
+              "value": "list"
+            },
+            {
+              "type": "str",
+              "value": "a"
+            },
+            {
+              "type": "quote",
+              "value": {
+                "type": "sym",
+                "value": "b"
+              }
+            }
+          ]
+        },
+        "printed": "(list \"a\" (quote b))"
+      }
+    ]
+  },
+  "response_reassembly": {
+    "$comment": "Each case is the raw byte stream a server would send over the socket (joined with \\n, EOF at end), and the expected parsed result after buffering to EOF, splitting on lines, and decoding -print/-print-nonl/-error payloads. The -emacs-pid preamble line must be tolerated and ignored, never treated as part of the result. A real Emacs server always builds replies with (pp v), which appends exactly one trailing newline before wire-encoding; exactly one trailing newline must be stripped from the final decoded/concatenated result (see the 'pp-style trailing newline' case).",
+    "cases": [
+      {
+        "name": "single print, no preamble stripped incorrectly",
+        "raw_lines": [
+          "-emacs-pid 12345",
+          "-print 42"
+        ],
+        "expected": {
+          "status": "ok",
+          "value": "42"
+        }
+      },
+      {
+        "name": "print-nonl continuation, no terminal marker, concatenated in line order",
+        "raw_lines": [
+          "-emacs-pid 111",
+          "-print-nonl abc&_def",
+          "-print ghi"
+        ],
+        "expected": {
+          "status": "ok",
+          "value": "abc defghi"
+        }
+      },
+      {
+        "name": "single print with a real Emacs pp-style trailing newline, stripped",
+        "raw_lines": [
+          "-emacs-pid 42",
+          "-print 3&n"
+        ],
+        "expected": {
+          "status": "ok",
+          "value": "3"
+        }
+      },
+      {
+        "name": "error response",
+        "raw_lines": [
+          "-emacs-pid 5",
+          "-error Symbol's&_function&_definition&_is&_void:&_foo"
+        ],
+        "expected": {
+          "status": "error",
+          "message": "Symbol's function definition is void: foo"
+        }
+      },
+      {
+        "name": "preamble only, no print/error line at all -> treated as failed/empty",
+        "raw_lines": [
+          "-emacs-pid 999"
+        ],
+        "expected": {
+          "status": "empty"
+        }
+      }
+    ]
+  }
+}
