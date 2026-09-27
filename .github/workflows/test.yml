@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -85,14 +86,19 @@ jobs:
 
       - name: Unit tests -- Rust
         working-directory: rust
-        run: cargo test
+        run: cargo test --features async
 
       - name: Spawn a test daemon
         run: |
           mkdir -p "$RUNNER_TEMP/sprite-xdg-runtime"
           chmod 700 "$RUNNER_TEMP/sprite-xdg-runtime"
+          # --eval loads sprite-async.el (repo root) into the daemon so
+          # live-daemon async tests can reach sprite-async-start/-poll;
+          # the daemon has no other init file (--no-init-file
+          # --no-site-file), so this is the only way it gets loaded.
           XDG_RUNTIME_DIR="$RUNNER_TEMP/sprite-xdg-runtime" \
-            emacs --daemon=ci.0.sprite --no-init-file --no-site-file &
+            emacs --daemon=ci.0.sprite --no-init-file --no-site-file \
+            --eval "(load-file \"$GITHUB_WORKSPACE/sprite-async.el\")" &
           sock="$RUNNER_TEMP/sprite-xdg-runtime/emacs/ci.0.sprite"
           for _ in $(seq 1 30); do
             [ -S "$sock" ] && break
@@ -106,20 +112,178 @@ jobs:
         working-directory: python
         run: |
           . .venv/bin/activate
-          pytest -q tests/test_integration.py -v
+          pytest -q tests/test_integration.py tests/test_async_integration.py -v
 
       - name: Integration tests -- JavaScript
         working-directory: js
-        run: node --test test/integration.test.js
+        run: node --test test/integration.test.js test/async_integration.test.js
 
       - name: Integration tests -- Go
         run: go test ./go/protocol/... -run LiveDaemon -v
 
       - name: Integration tests -- Rust
         working-directory: rust
-        run: cargo test --test integration -- --nocapture
+        run: cargo test --features async --test integration -- --nocapture
 
       - name: Integration smoke test -- CLI
         run: |
           go run ./cmd/sprite call ci.0.sprite '+' --args '[1,2]'
           go run ./cmd/sprite eval ci.0.sprite '(+ 3 4)'
+
+      # Timeout / hung-daemon suites each spawn and tear down their own
+      # disposable emacs --fg-daemon (see fixtures/CONTRACT.md's sibling
+      # test files) -- they don't touch ci.0.sprite/SPRITE_TEST_SOCKET,
+      # so they can run alongside the integration tests above rather
+      # than needing their own job.
+      - name: Timeout tests -- Python
+        working-directory: python
+        run: |
+          . .venv/bin/activate
+          pytest -q tests/test_timeout.py -v
+
+      - name: Timeout tests -- JavaScript
+        working-directory: js
+        run: node --test test/timeout.test.js
+
+      - name: Timeout tests -- Go
+        run: go test ./go/protocol/... -run 'TimeoutFires|TimeoutConfigured|TimesOutDistinctly|NonexistentSocket' -v
+
+      - name: Timeout tests -- Rust
+        working-directory: rust
+        run: cargo test --test timeout -- --nocapture
+
+  # Native, per-language micro-benchmarks (go test -bench, pytest
+  # -benchmark, a perf_hooks script, and criterion) for EvalBlocking vs.
+  # an `emacsclient --eval` subprocess baseline. Each language uses its
+  # own idiomatic tool rather than a shared cross-language driver, since
+  # these numbers are for tracking each language's own per-call cost
+  # over time, not a strict cross-language comparison.
+  #
+  # Runs on every push to main, throttled to at most once per UTC day
+  # via the cache-marker below, plus always on a manual
+  # workflow_dispatch. Kept out of the push/PR-gating sprite-clients job
+  # above: wall-clock numbers on a shared GitHub-hosted runner are too
+  # noisy to treat as a pass/fail gate (see plan 7a4d1's "ANSWERED" open
+  # question on this), so this job never blocks a merge -- each
+  # benchmark step uses `continue-on-error` so one language's flake
+  # doesn't hide the others' reports.
+  sprite-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compute today's date (UTC)
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # Once-per-day throttle for push events only: the cache key is
+      # date-only (no run id), so the first push of a UTC day misses and
+      # every later push that same day hits the same key and skips the
+      # run below. workflow_dispatch always bypasses this (see the `if`
+      # on later steps). continue-on-error means a cache-service hiccup
+      # fails open -- worst case the benchmark runs an extra time that
+      # day, never that it silently stops running altogether.
+      - name: Once-per-day throttle marker
+        id: throttle
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: .bench-ran
+          key: sprite-bench-ran-${{ steps.date.outputs.today }}
+
+      - name: Skip reason
+        if: github.event_name == 'push' && steps.throttle.outputs.cache-hit == 'true'
+        run: echo "Benchmark already ran today (UTC); skipping until tomorrow or a manual workflow_dispatch." | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Mark benchmark as run today
+        if: github.event_name == 'push' && steps.throttle.outputs.cache-hit != 'true'
+        run: touch .bench-ran
+
+      - name: Install Emacs
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y emacs-nox
+
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v5
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        with:
+          node-version: "lts/*"
+      - uses: actions/setup-go@v5
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+
+      - name: Spawn a disposable daemon
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/sprite-bench-xdg"
+          chmod 700 "$RUNNER_TEMP/sprite-bench-xdg"
+          XDG_RUNTIME_DIR="$RUNNER_TEMP/sprite-bench-xdg" \
+            emacs --fg-daemon=bench.0.sprite --no-init-file --no-site-file &
+          sock="$RUNNER_TEMP/sprite-bench-xdg/emacs/bench.0.sprite"
+          for _ in $(seq 1 30); do
+            [ -S "$sock" ] && break
+            sleep 0.5
+          done
+          [ -S "$sock" ] || { echo "daemon socket never appeared" >&2; exit 1; }
+          echo "SPRITE_TEST_SOCKET=$sock" >> "$GITHUB_ENV"
+
+      - name: Benchmark -- Go
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          {
+            echo '## Go'
+            echo '```'
+            go test ./go/protocol/... -run '^$' -bench . -benchmem
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Benchmark -- Python
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        continue-on-error: true
+        working-directory: python
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -e '.[bench]'
+          {
+            echo '## Python'
+            echo '```'
+            pytest tests/test_bench.py --benchmark-only -v
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Benchmark -- JavaScript
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        continue-on-error: true
+        working-directory: js
+        run: |
+          {
+            echo '## JavaScript'
+            echo '```'
+            node bench/bench.js
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Benchmark -- Rust
+        if: github.event_name == 'workflow_dispatch' || steps.throttle.outputs.cache-hit != 'true'
+        continue-on-error: true
+        working-directory: rust
+        run: |
+          {
+            echo '## Rust'
+            echo '```'
+            cargo bench --bench eval_bench
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
