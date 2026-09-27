@@ -13,3 +13,6 @@ python/*.egg-info/
 
 # Node
 js/node_modules/
+
+# Rust
+rust/target/
