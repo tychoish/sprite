@@ -46,7 +46,7 @@
 (require 'subr-x)
 (require 'map)
 (require 'sprite-direct)
-(require 'sprite-session)
+(require 'sprite-system)
 (require 'savehist)
 
 (declare-function annotated-completing-read "annotated-completing-read")
@@ -397,14 +397,14 @@ For each provisional entry whose :parent matches `sprite-instance-name':
                (sprite--registry-put new-s)
                (sprite--registry-remove (sprite-name s))))
             (t
-             (sprite-session-add-on-idle #'sprite-defs-activate-idle-check))))))
+             (sprite-system-add-on-idle #'sprite-defs-activate-idle-check))))))
      (sprite--registry-all))))
 
 (defun sprite-defs-activate-idle-check ()
   "Idle hook: activate pending definitions; deregister when none remain."
   (sprite-defs-activate)
   (unless (seq-some #'sprite--provisional-p (sprite--registry-all))
-    (sprite-session-remove-on-idle #'sprite-defs-activate-idle-check)))
+    (sprite-system-remove-on-idle #'sprite-defs-activate-idle-check)))
 
 ;;;; Communication and eval
 

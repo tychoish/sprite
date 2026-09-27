@@ -17,7 +17,7 @@ API documentation for the entire =sprite= package, generated from docstrings.
                      "sprite-future.el"
                      "sprite-heartbeat.el"
                      "sprite-list.el"
-                     "sprite-session.el")))
+                     "sprite-system.el")))
      :scope 'exported
      :include-kinds '(variables customs)
      :namespace "sprite"
@@ -29,7 +29,7 @@ API documentation for the entire =sprite= package, generated from docstrings.
                  "sprite-future"
                  "sprite-heartbeat"
                  "sprite-list"
-                 "sprite-session")))
+                 "sprite-system")))
 #+END_SRC
 
 #+RESULTS:
@@ -789,81 +789,81 @@ Open a new Emacs frame connected to the sprite at point.
 
 Actions for the sprite overview buffer.
 
-** sprite-session
+** sprite-system
 
-*** [[file:../sprite-session.el::26][sprite-session-idle-timeout]] :option:
+*** [[file:../sprite-system.el::26][sprite-system-idle-timeout]] :option:
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-idle-timeout
+:CUSTOM_ID: sprite-system-idle-timeout
 :END:
 
-Seconds of Emacs idle before ~sprite-session-idle-hook~ fires.
+Seconds of Emacs idle before ~sprite-system-idle-hook~ fires.
 
-*** [[file:../sprite-session.el::31][sprite-session-idle-hook]] :variable:
+*** [[file:../sprite-system.el::31][sprite-system-idle-hook]] :variable:
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-idle-hook
+:CUSTOM_ID: sprite-system-idle-hook
 :END:
 
-Hook run when Emacs has been idle for ~sprite-session-idle-timeout~ seconds. Each function is called with no arguments.
+Hook run when Emacs has been idle for ~sprite-system-idle-timeout~ seconds. Each function is called with no arguments.
 
-*** [[file:../sprite-session.el::38][sprite-session-start-idle-timer]]
+*** [[file:../sprite-system.el::38][sprite-system-start-idle-timer]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-start-idle-timer
+:CUSTOM_ID: sprite-system-start-idle-timer
 :END:
 
-Start a repeating idle timer that runs ~sprite-session-idle-hook~. Cancels any existing timer first.
+Start a repeating idle timer that runs ~sprite-system-idle-hook~. Cancels any existing timer first.
 
-*** [[file:../sprite-session.el::46][sprite-session-stop-idle-timer]]
+*** [[file:../sprite-system.el::46][sprite-system-stop-idle-timer]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-stop-idle-timer
+:CUSTOM_ID: sprite-system-stop-idle-timer
 :END:
 
 Cancel the idle timer.
 
-*** [[file:../sprite-session.el::52][sprite-session-sync-idle-timer]]
+*** [[file:../sprite-system.el::52][sprite-system-sync-idle-timer]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-sync-idle-timer
+:CUSTOM_ID: sprite-system-sync-idle-timer
 :END:
 
-Start or stop the idle timer to match ~sprite-session-idle-hook~ membership. Starts the timer when the hook is non-nil; stops it when empty. Always logs: sprite-session: idle timer <running|stopped> (<N> registered ops)
+Start or stop the idle timer to match ~sprite-system-idle-hook~ membership. Starts the timer when the hook is non-nil; stops it when empty. Always logs: sprite-system: idle timer <running|stopped> (<N> registered ops)
 
-*** [[file:../sprite-session.el::67][sprite-session-add-on-idle]]
+*** [[file:../sprite-system.el::67][sprite-system-add-on-idle]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-add-on-idle
+:CUSTOM_ID: sprite-system-add-on-idle
 :END:
 
-Add FN to ~sprite-session-idle-hook~ and start the timer if needed. Logs the registration and delegates to ~sprite-session-sync-idle-timer~.
+Add FN to ~sprite-system-idle-hook~ and start the timer if needed. Logs the registration and delegates to ~sprite-system-sync-idle-timer~.
 
-*** [[file:../sprite-session.el::76][sprite-session-remove-on-idle]]
+*** [[file:../sprite-system.el::76][sprite-system-remove-on-idle]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-remove-on-idle
+:CUSTOM_ID: sprite-system-remove-on-idle
 :END:
 
-Remove FN from ~sprite-session-idle-hook~ and stop the timer if the hook is empty. Logs the deregistration and delegates to ~sprite-session-sync-idle-timer~.
+Remove FN from ~sprite-system-idle-hook~ and stop the timer if the hook is empty. Logs the deregistration and delegates to ~sprite-system-sync-idle-timer~.
 
-*** [[file:../sprite-session.el::88][sprite-session-before-sleep-hook]] :variable:
+*** [[file:../sprite-system.el::88][sprite-system-before-sleep-hook]] :variable:
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-before-sleep-hook
+:CUSTOM_ID: sprite-system-before-sleep-hook
 :END:
 
 Hook run before the system suspends or hibernates. Each function is called with no arguments.  Only fires on Linux systems with DBus support and systemd-logind.
 
-*** [[file:../sprite-session.el::93][sprite-session-after-sleep-hook]] :variable:
+*** [[file:../sprite-system.el::93][sprite-system-after-sleep-hook]] :variable:
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-after-sleep-hook
+:CUSTOM_ID: sprite-system-after-sleep-hook
 :END:
 
 Hook run when the system resumes from suspend or hibernate. Each function is called with no arguments.  Only fires on Linux systems with DBus support and systemd-logind.
 
-*** [[file:../sprite-session.el::116][sprite-session-start-logind-watch]]
+*** [[file:../sprite-system.el::116][sprite-system-start-logind-watch]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-start-logind-watch
+:CUSTOM_ID: sprite-system-start-logind-watch
 :END:
 
 Register DBus signals to run sleep/wake/lock/screensaver hooks. Cancels any existing registrations first to prevent duplicates.
 
-*** [[file:../sprite-session.el::164][sprite-session-stop-logind-watch]]
+*** [[file:../sprite-system.el::164][sprite-system-stop-logind-watch]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-session-stop-logind-watch
+:CUSTOM_ID: sprite-system-stop-logind-watch
 :END:
 
 Unregister the logind PrepareForSleep DBus signal and other signals.

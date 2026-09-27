@@ -34,7 +34,7 @@ to your full configuration).
 
 Emacs Lisp tools include: IPC via direct socket communication (=sprite-direct=),
 composable futures and coroutines (=sprite-future=), distributed multi-daemon
-workers (=sprite-fleet=), and power/idle lifecycle hooks (=sprite-session=).
+workers (=sprite-fleet=), and power/idle lifecycle hooks (=sprite-system=).
 
 Open the interactive dashboard with ~sprite-list~, or spawn a new daemon with
 ~sprite-create~.
@@ -147,7 +147,7 @@ Below is a complete ~use-package~ configuration block setting useful options wit
   (require 'sprite-direct)
   (require 'sprite-future)
   (require 'sprite-fleet)
-  (require 'sprite-session)
+  (require 'sprite-system)
 
   ;; Daemon management limits and timeouts
   (setq sprite-max-count 8)                   ; default: 8 (maximum subordinate daemons)
@@ -158,11 +158,11 @@ Below is a complete ~use-package~ configuration block setting useful options wit
   (setq sprite-direct-blocking-timeout 15.0)   ; default: 15.0 (seconds before synchronous socket times out)
   (setq sprite-direct-async-check-interval 0.05) ; default: 0.05 (seconds between promise poll cycles)
 
-  ;; Power and session triggers (sprite-session)
-  (setq sprite-session-idle-timeout 1800)     ; default: 3600 (seconds of inactivity before idle hooks)
-  (sprite-session-start-idle-timer)
+  ;; Power and session triggers (sprite-system)
+  (setq sprite-system-idle-timeout 1800)     ; default: 3600 (seconds of inactivity before idle hooks)
+  (sprite-system-start-idle-timer)
   (when (executable-find "loginctl")
-    (sprite-session-start-logind-watch)))
+    (sprite-system-start-logind-watch)))
 #+END_SRC
 
 ** Key Options & Customization
@@ -172,7 +172,7 @@ Below is a complete ~use-package~ configuration block setting useful options wit
 - *Daemon Concurrency*: ~sprite-max-count~ specifies the upper boundary of subordinate daemon processes that ~sprite-get-or-create-next~ will spawn.
 - *Availability Window*: ~sprite-active-threshold~ controls the duration in seconds since last contact after which a running daemon is marked idle and available for reassignment.
 - *Socket Timeouts*: ~sprite-direct-blocking-timeout~ defines the fail-safe timeout for synchronous expressions evaluated over direct sockets.
-- *Idle Monitoring*: ~sprite-session-idle-timeout~ governs how long user input must pause before ~sprite-session-idle-hook~ callbacks execute.
+- *Idle Monitoring*: ~sprite-system-idle-timeout~ governs how long user input must pause before ~sprite-system-idle-hook~ callbacks execute.
 
 * Core Concepts and Architecture
 :PROPERTIES:
@@ -242,7 +242,7 @@ Detailed architecture and workflow guides live under [[file:docs/][docs/]]:
 - [[file:docs/daemon-lifecycle.org][Daemon Lifecycle and Architecture]]
 - [[file:docs/direct-socket.org][Direct Socket Communication Protocol]]
 - [[file:docs/futures-and-fleet.org][Futures, Async/Await, and Fleet Coordination]]
-- [[file:docs/session-triggers.org][Session Lifecycle and Sleep Hooks]]
+- [[file:docs/system-triggers.org][Session Lifecycle and Sleep Hooks]]
 - [[file:docs/sprite-list.org][Interactive Sprite Dashboard]]
 
 * API Reference
@@ -269,7 +269,7 @@ Detailed API documentation for all modules, options, and commands is available i
 | [[file:docs/api.org::#sprite-future-eval][~sprite-future-eval~]]                                                | Function | Dispatch background computation returning a composable future       |
 | [[file:docs/api.org::#sprite-future-await][~sprite-future-await~]]                                              | Macro    | Coroutine await operator inside async functions                     |
 | [[file:docs/api.org::#sprite-fleet-mapcar][~sprite-fleet-mapcar~]]                                              | Function | Scatter/gather parallel mapping across a fleet of daemon workers    |
-| [[file:docs/api.org::#sprite-session-start-idle-timer][~sprite-session-start-idle-timer~]]                                  | Command  | Start global user inactivity timer to throttle background workers   |
+| [[file:docs/api.org::#sprite-system-start-idle-timer][~sprite-system-start-idle-timer~]]                                  | Command  | Start global user inactivity timer to throttle background workers   |
 | [[file:docs/api.org::#sprite-max-count][~sprite-max-count~]]                                                  | Option   | Maximum allowable subordinate daemon instances                      |
 | [[file:docs/api.org::#sprite-active-threshold][~sprite-active-threshold~]]                                          | Option   | Inactivity threshold in seconds before a daemon is deemed available |
 
