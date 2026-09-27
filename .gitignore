@@ -1,3 +1,6 @@
 **.elc
 sprite-autoloads.el
 sprite-pkg.el
+
+# Go
+/sprite
