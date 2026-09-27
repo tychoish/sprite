@@ -229,7 +229,7 @@ See `sprite-future-await', which unwraps this and re-signals its VALUE."
 
 (cl-defmacro sprite-future-async-defun (name arglist &rest body)
   "Define NAME as an async sprite workflow.
-Inside BODY, `sprite-future-await' suspends the generator until a future settles,
+Inside BODY, `sprite-future-await' suspends until a future settles,
 without blocking the parent Emacs event loop.  Calling NAME returns
 immediately with a `sprite-future' for the workflow's overall result."
   (declare (indent defun) (doc-string 3))

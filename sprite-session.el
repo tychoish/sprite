@@ -74,8 +74,8 @@ Logs the registration and delegates to `sprite-session-sync-idle-timer'."
 
 ;;;###autoload
 (defun sprite-session-remove-on-idle (fn)
-  "Remove FN from `sprite-session-idle-hook' and stop the timer if the hook is empty.
-Logs the deregistration and delegates to `sprite-session-sync-idle-timer'."
+  "Remove FN from `sprite-session-idle-hook' and maybe stop timer.
+Logs deregistration and delegates to `sprite-session-sync-idle-timer'."
   (let ((inhibit-message t))
     (message "sprite-session: deregistered idle op: %s" (symbol-name fn)))
   (remove-hook 'sprite-session-idle-hook fn)

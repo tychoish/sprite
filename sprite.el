@@ -54,6 +54,7 @@
 ;; absent in batch/test contexts.
 (defvar server-use-tcp)
 (defvar server-auth-dir)
+(defvar server-socket-dir)
 
 ;;;; Instance identity and state paths
 
@@ -68,7 +69,7 @@
 Set by `sprite-set-up-instance-name' at startup.")
 
 (defvar sprite--system-name-cached nil
-  "Cached value of the output of `funcion:system-name' for use in system management contexts.")
+  "Cached value of `system-name' for use in system contexts.")
 
 (defvar sprite-cli-instance-id nil
   "CLI-specified instance name; set from --id command-line arguments.")
@@ -124,7 +125,7 @@ only when running as root or under a symlinked `user-emacs-directory'."
 
 ;;;autoload
 (defun sprite-state-path (name)
-  "Return the full state-directory path for NAME, scoped to this host and instance."
+  "Return full state-directory path for NAME, scoped to host and instance."
   (file-name-concat
    user-emacs-directory
    sprite--conf-state-directory
@@ -161,7 +162,7 @@ All three segments must be non-empty and contain no dots."
           (nth 2 parts))))
 
 (defun sprite--full-name-p (name)
-  "Return t if NAME matches the sprite full-name pattern <parent>.<idx>.<unique>."
+  "Return t if NAME matches sprite full pattern <parent>.<idx>.<unique>."
   (and (stringp name)
        (string-match-p "^[^.]+\\.[0-9]+\\.[^.]+$" name)
        t))
@@ -188,7 +189,7 @@ the raw instance id for top-level instances."
   (sprite--mode-line-id (sprite-instance-name)))
 
 (cl-defun sprite-state-directory (&key full-name)
-  "Return the state directory for sprite instance FULL-NAME, or the sprite root if nil."
+  "Return state directory for sprite FULL-NAME, or sprite root if nil."
   (let ((base (file-name-as-directory (sprite-state-path sprite--state-subdir))))
     (if full-name
         (file-name-concat base full-name)
@@ -325,7 +326,7 @@ A list of plists; populated by `sprite--registry-serialize'.")
     n))
 
 (defun sprite--make-from-state-dir (full-name)
-  "Create a minimal sprite struct from a discovered state directory name FULL-NAME."
+  "Create minimal sprite struct from discovered state directory FULL-NAME."
   (if-let* ((parts (sprite--parse-full-name full-name)))
     (let ((parent (nth 0 parts))
           (idx (nth 1 parts))
@@ -590,7 +591,7 @@ dependency.  Specify the text of the PROMPT."
 
 (defun sprite--completing-read (prompt)
   "Read a sprite name from the registry using annotated completion.
-Each candidate is annotated with its index and uptime.  Specify the text of the PROMPT."
+Each candidate is annotated with index and uptime.  Specify PROMPT text."
   (sprite--annotated-or-plain-read
    prompt
    (seq-map (lambda (s)
@@ -607,7 +608,7 @@ Each candidate is annotated with its index and uptime.  Specify the text of the 
   (interactive (list (sprite--completing-read "Stop sprite: ")))
   (with-sprite (sprite--resolve-name name) (kill-emacs)))
 (defun sprite-restart (name)
-  "Restart sprite NAME: stop it then create a new daemon with the same unique-name."
+  "Restart sprite NAME: stop it then create daemon with same unique-name."
   (interactive (list (sprite--completing-read "Restart sprite: ")))
   (let* ((full-name (sprite--resolve-name name))
          (s (sprite--registry-get full-name)))
