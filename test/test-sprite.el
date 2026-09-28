@@ -34,6 +34,7 @@
 (defvar server-auth-dir)
 
 (require 'sprite)
+(require 'sprite-daemon)
 (require 'sprite-list)
 
 ;; In batch/test mode there is no running daemon and no CLI override, so
