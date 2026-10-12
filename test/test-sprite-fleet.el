@@ -157,7 +157,7 @@
         (should (= 3 (length dispatches)))))))
 
 (ert-deftest sprite-fleet/fleet-mapcar-async-returns-future ()
-  "`sprite-fleet-mapcar' with :async t returns a resolved sprite-future."
+  "`sprite-fleet-mapcar' with :async t returns a sprite-future."
   (cl-letf (((symbol-function 'sprite-future-eval)
              (lambda (target form)
                (let ((f (sprite-future--make :target target :state :pending)))
@@ -165,6 +165,8 @@
                  f))))
     (let ((future (sprite-fleet-mapcar 'identity '("a" "b") :sprites '("w0") :async t)))
       (should (sprite-future-p future))
+      (while (sprite-future-pending-p future)
+        (sit-for 0.005))
       (should (sprite-future-resolved-p future))
       (should (equal '("done-a" "done-b") (sprite-future-value future))))))
 
@@ -179,5 +181,276 @@
                    f))))
       (let ((res (sprite-fleet-mapcar '(+ item 1) '(5 15) :sprites '("w0"))))
         (should (equal '(6 16) res))))))
+
+;;;; Stepper engine, flow control, and combinators
+
+(defmacro sprite-fleet-test-wait-until (predicate &optional timeout)
+  "Wait until PREDICATE returns non-nil, or TIMEOUT seconds elapse."
+  `(let ((start (float-time))
+         (max-t (or ,timeout 2.0)))
+     (while (and (not ,predicate)
+                 (< (- (float-time) start) max-t))
+       (sit-for 0.005))
+     (should ,predicate)))
+
+(ert-deftest sprite-fleet/stepper-engine-progress-tracking ()
+  "`sprite-fleet-progress' reports completed and total count accurately."
+  (let ((items '(1 2 3 4)))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (run-with-timer 0.01 nil
+                                   (lambda ()
+                                     (sprite-future--settle f :resolved (eval form))))
+                   f))))
+      (let* ((handle (sprite-fleet-pool '1+ items :sprites '("w1" "w2"))))
+        (should (equal '(0 . 4) (sprite-fleet-progress handle)))
+        (sprite-fleet-test-wait-until (sprite-fleet-completed-p handle))
+        (should (equal '(4 . 4) (sprite-fleet-progress handle)))
+        (should (equal '(2 3 4 5) (sprite-future-value (sprite-fleet-handle-future handle))))))))
+
+(ert-deftest sprite-fleet/stepper-engine-pause-and-resume ()
+  "`sprite-fleet-pause' freezes new dispatches; `sprite-fleet-resume' continues."
+  (let ((dispatches nil)
+        (callbacks nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (push (cons target form) dispatches)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (push (cons (cadr (cadr form)) f) callbacks)
+                   f))))
+      (let* ((handle (sprite-fleet-pool 'identity '(10 20 30 40)
+                                        :sprites '("w1" "w2"))))
+        ;; Wait until initial 2 workers are dispatched
+        (sprite-fleet-test-wait-until (= (length dispatches) 2))
+        (should (sprite-fleet-running-p handle))
+        ;; Pause the handle
+        (sprite-fleet-pause handle)
+        (should (sprite-fleet-paused-p handle))
+        ;; Settle first worker
+        (let ((c1 (cdr (assq 10 callbacks))))
+          (sprite-future--settle c1 :resolved 10))
+        (sit-for 0.02)
+        ;; No new workers should have been dispatched while paused
+        (should (= (length dispatches) 2))
+        ;; Settle second worker
+        (let ((c2 (cdr (assq 20 callbacks))))
+          (sprite-future--settle c2 :resolved 20))
+        (sit-for 0.02)
+        (should (= (length dispatches) 2))
+        ;; Now resume
+        (sprite-fleet-resume handle)
+        (should (sprite-fleet-running-p handle))
+        ;; Remaining 2 workers are dispatched
+        (sprite-fleet-test-wait-until (= (length dispatches) 4))
+        ;; Settle remaining workers
+        (sprite-future--settle (cdr (assq 30 callbacks)) :resolved 30)
+        (sprite-future--settle (cdr (assq 40 callbacks)) :resolved 40)
+        (sprite-fleet-test-wait-until (sprite-fleet-completed-p handle))
+        (should (equal '(10 20 30 40) (sprite-future-value (sprite-fleet-handle-future handle))))))))
+
+(ert-deftest sprite-fleet/stepper-engine-cancel-aborts-scheduled-and-active ()
+  "`sprite-fleet-cancel' stops execution, cancels in-flight workers, and rejects future."
+  (let ((dispatches nil)
+        (worker-futures nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (push (cons target form) dispatches)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (push f worker-futures)
+                   f))))
+      (let* ((handle (sprite-fleet-pool 'identity '(1 2 3 4 5 6)
+                                        :sprites '("w1" "w2"))))
+        (sprite-fleet-test-wait-until (= (length dispatches) 2))
+        (sprite-fleet-cancel handle :user-requested-abort)
+        (should (sprite-fleet-canceled-p handle))
+        (should (sprite-future-rejected-p (sprite-fleet-handle-future handle)))
+        (should (equal '(:canceled . :user-requested-abort)
+                       (sprite-future-value (sprite-fleet-handle-future handle))))
+        ;; All in-flight worker futures should be rejected as canceled
+        (dolist (wf worker-futures)
+          (should (sprite-future-rejected-p wf))
+          (should (equal '(:canceled . :user-requested-abort)
+                         (sprite-future-value wf))))
+        (sit-for 0.02)
+        ;; No further dispatches occurred
+        (should (= (length dispatches) 2))))))
+
+(ert-deftest sprite-fleet/stepper-engine-error-policy-collect-nil ()
+  "`:error-policy :collect-nil' replaces rejected worker values with nil."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending))
+                     (item (cadr (cadr form))))
+                 (run-with-timer 0.005 nil
+                                 (lambda ()
+                                   (if (= item 2)
+                                       (sprite-future--settle f :rejected "boom")
+                                     (sprite-future--settle f :resolved (* item 10)))))
+                 f))))
+    (let ((res (sprite-fleet-mapcar 'identity '(1 2 3)
+                                    :sprites '("w1" "w2")
+                                    :error-policy :collect-nil)))
+      (should (equal '(10 nil 30) res)))))
+
+(ert-deftest sprite-fleet/stepper-engine-error-policy-collect-error ()
+  "`:error-policy :collect-error' stores error descriptors for failed items."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending))
+                     (item (cadr (cadr form))))
+                 (run-with-timer 0.005 nil
+                                 (lambda ()
+                                   (if (= item 2)
+                                       (sprite-future--settle f :rejected "fail-err")
+                                     (sprite-future--settle f :resolved (* item 10)))))
+                 f))))
+    (let ((res (sprite-fleet-mapcar 'identity '(1 2 3)
+                                    :sprites '("w1" "w2")
+                                    :error-policy :collect-error)))
+      (should (equal 10 (nth 0 res)))
+      (should (equal '(:error "fail-err" :target "w2") (nth 1 res)))
+      (should (equal 30 (nth 2 res))))))
+
+(ert-deftest sprite-fleet/stepper-engine-error-policy-abort ()
+  "`:error-policy :abort' cancels the fleet upon first worker failure."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending))
+                     (item (cadr (cadr form))))
+                 (run-with-timer 0.005 nil
+                                 (lambda ()
+                                   (if (= item 2)
+                                       (sprite-future--settle f :rejected "critical-failure")
+                                     (sprite-future--settle f :resolved (* item 10)))))
+                 f))))
+    (let* ((future (sprite-fleet-map 'identity '(1 2 3 4)
+                                     :sprites '("w1")
+                                     :error-policy :abort)))
+      (sprite-fleet-test-wait-until (sprite-future-rejected-p future))
+      (should (equal :canceled (car (sprite-future-value future))))
+      (should (equal '(:worker-failed "w1" "critical-failure")
+                     (cdr (sprite-future-value future)))))))
+
+(ert-deftest sprite-fleet/stepper-engine-order-fifo ()
+  "`:order \='fifo' returns results in order of completion."
+  (let ((callbacks nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (push (cons (cadr (cadr form)) f) callbacks)
+                   f))))
+      (let* ((handle (sprite-fleet-pool 'identity '(a b c)
+                                        :sprites '("w1" "w2" "w3")
+                                        :order 'fifo)))
+        (sprite-fleet-test-wait-until (= (length callbacks) 3))
+        ;; Settle out of order: b, then c, then a
+        (sprite-future--settle (cdr (assq 'b callbacks)) :resolved "res-b")
+        (sprite-future--settle (cdr (assq 'c callbacks)) :resolved "res-c")
+        (sprite-future--settle (cdr (assq 'a callbacks)) :resolved "res-a")
+        (sprite-fleet-test-wait-until (sprite-fleet-completed-p handle))
+        (should (equal '("res-b" "res-c" "res-a")
+                       (sprite-future-value (sprite-fleet-handle-future handle))))))))
+
+(ert-deftest sprite-fleet/stepper-engine-order-lifo ()
+  "`:order \='lifo' returns results in reverse order of completion."
+  (let ((callbacks nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (push (cons (cadr (cadr form)) f) callbacks)
+                   f))))
+      (let* ((handle (sprite-fleet-pool 'identity '(a b c)
+                                        :sprites '("w1" "w2" "w3")
+                                        :order 'lifo)))
+        (sprite-fleet-test-wait-until (= (length callbacks) 3))
+        (sprite-future--settle (cdr (assq 'b callbacks)) :resolved "res-b")
+        (sprite-future--settle (cdr (assq 'c callbacks)) :resolved "res-c")
+        (sprite-future--settle (cdr (assq 'a callbacks)) :resolved "res-a")
+        (sprite-fleet-test-wait-until (sprite-fleet-completed-p handle))
+        (should (equal '("res-a" "res-c" "res-b")
+                       (sprite-future-value (sprite-fleet-handle-future handle))))))))
+
+(ert-deftest sprite-fleet/stepper-engine-lazy-vector ()
+  "`sprite-fleet-map' accepts vectors as input sequences."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending)))
+                 (run-with-timer 0.005 nil
+                                 (lambda ()
+                                   (sprite-future--settle f :resolved (* (cadr (cadr form)) 2))))
+                 f))))
+    (let ((future (sprite-fleet-map 'identity [10 20 30] :sprites '("w1" "w2"))))
+      (sprite-fleet-test-wait-until (sprite-future-resolved-p future))
+      (should (equal '(20 40 60) (sprite-future-value future))))))
+
+(ert-deftest sprite-fleet/stepper-engine-lazy-generator ()
+  "`sprite-fleet-map' consumes generator iterators lazily."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form)
+               (let ((f (sprite-future--make :target target :state :pending)))
+                 (run-with-timer 0.005 nil
+                                 (lambda ()
+                                   (sprite-future--settle f :resolved (concat "gen-" (cadr (cadr form))))))
+                 f))))
+    (let* ((gen (iter-make (iter-yield "x") (iter-yield "y") (iter-yield "z")))
+           (future (sprite-fleet-map 'identity gen :sprites '("w1" "w2"))))
+      (sprite-fleet-test-wait-until (sprite-future-resolved-p future))
+      (should (equal '("gen-x" "gen-y" "gen-z") (sprite-future-value future))))))
+
+(ert-deftest sprite-fleet/each-streams-items ()
+  "`sprite-fleet-each' streams results via on-item callback and returns handle."
+  (let ((streamed nil)
+        (done-called nil))
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (run-with-timer 0.005 nil
+                                   (lambda ()
+                                     (sprite-future--settle f :resolved (1+ (cadr (cadr form))))))
+                   f))))
+      (let ((handle (sprite-fleet-each 'identity '(1 2 3)
+                                       :sprites '("w1")
+                                       :on-item (lambda (item result idx)
+                                                  (push (list item result idx) streamed))
+                                       :on-done (lambda (_res) (setq done-called t)))))
+        (should (sprite-fleet-handle-p handle))
+        (sprite-fleet-test-wait-until done-called)
+        (should (= 3 (length streamed)))
+        (should (equal '((3 4 2) (2 3 1) (1 2 0)) streamed))))))
+
+(ert-deftest sprite-fleet/future-cancel-severs-process ()
+  "`sprite-future-cancel' calls `delete-process' on underlying backend handle."
+  (let* ((proc (make-process :name "test-dummy-proc"
+                             :command '("cat")
+                             :buffer nil))
+         (f (sprite-future--make :target "w0"
+                                 :state :pending
+                                 :backend-handle proc)))
+    (should (process-live-p proc))
+    (should (sprite-future-pending-p f))
+    (sprite-future-cancel f :test-reason)
+    (should (sprite-future-rejected-p f))
+    (should (equal '(:canceled . :test-reason) (sprite-future-value f)))
+    (should-not (process-live-p proc))))
+
+
+(ert-deftest sprite-fleet/strict-validation-checks ()
+  "Invalid arguments signal immediate type/value errors."
+  ;; Invalid order
+  (should-error (sprite-fleet-pool 'identity '(1 2) :sprites '("w1") :order 'invalid-order))
+  ;; Invalid error-policy
+  (should-error (sprite-fleet-pool 'identity '(1 2) :sprites '("w1") :error-policy :bad-policy))
+  ;; Negative delay
+  (should-error (sprite-fleet-pool 'identity '(1 2) :sprites '("w1") :delay -0.5)))
+
+(ert-deftest sprite-fleet/weak-handle-lookup ()
+  "`sprite-future-fleet-handle' resolves handle without future metadata slot."
+  (let ((future (sprite-fleet-map 'identity '() :sprites '("w1"))))
+    (should (sprite-future-p future))
+    (let ((handle (sprite-future-fleet-handle future)))
+      (should (sprite-fleet-handle-p handle))
+      (should (eq (sprite-fleet-handle-future handle) future)))))
+
 (provide 'test-sprite-fleet)
 ;;; test-sprite-fleet.el ends here

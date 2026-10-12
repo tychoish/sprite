@@ -28,6 +28,7 @@
 ;;   `sprite-future-eval'       — start an async eval; returns a future
 ;;   `sprite-future-then'       — chain a callback; returns a new future
 ;;   `sprite-future-wait'       — block until a future settles
+;;   `sprite-future-cancel'     — cancel in-flight eval, severing process/socket
 ;;   `sprite-future-pending-p'  — predicate: not yet settled
 ;;   `sprite-future-resolved-p' — predicate: settled successfully
 ;;   `sprite-future-rejected-p' — predicate: settled with failure
@@ -147,6 +148,17 @@ TIMEOUT overrides `sprite-direct-blocking-timeout'; nil waits indefinitely."
                 (or (null proc) (process-live-p proc)))
       (accept-process-output proc sprite-direct-async-check-interval nil t))
     (sprite-future-value future)))
+
+(defun sprite-future-cancel (future &optional reason)
+  "Cancel FUTURE if pending, severing its underlying process/socket.
+Transitions FUTURE to :rejected with (cons :canceled (or reason :user-cancel)).
+Returns t if cancelled, nil if already settled."
+  (when (sprite-future-pending-p future)
+    (let ((proc (sprite-future--handle-process future)))
+      (when (and proc (process-live-p proc))
+        (delete-process proc)))
+    (sprite-future--settle future :rejected (cons :canceled (or reason :user-cancel)))
+    t))
 
 ;;;; Backend: direct socket
 
