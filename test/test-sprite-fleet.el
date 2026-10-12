@@ -378,7 +378,7 @@
                (let ((f (sprite-future--make :target target :state :pending)))
                  (run-with-timer 0.005 nil
                                  (lambda ()
-                                   (sprite-future--settle f :resolved (* (cadr (cadr form)) 2))))
+                                   (sprite-future--settle f :resolved (* (eval form) 2))))
                  f))))
     (let ((future (sprite-fleet-map 'identity [10 20 30] :sprites '("w1" "w2"))))
       (sprite-fleet-test-wait-until (sprite-future-resolved-p future))
@@ -391,7 +391,7 @@
                (let ((f (sprite-future--make :target target :state :pending)))
                  (run-with-timer 0.005 nil
                                  (lambda ()
-                                   (sprite-future--settle f :resolved (concat "gen-" (cadr (cadr form))))))
+                                   (sprite-future--settle f :resolved (concat "gen-" (eval form)))))
                  f))))
     (let* ((gen (iter-make (iter-yield "x") (iter-yield "y") (iter-yield "z")))
            (future (sprite-fleet-map 'identity gen :sprites '("w1" "w2"))))
@@ -407,7 +407,7 @@
                  (let ((f (sprite-future--make :target target :state :pending)))
                    (run-with-timer 0.005 nil
                                    (lambda ()
-                                     (sprite-future--settle f :resolved (1+ (cadr (cadr form))))))
+                                     (sprite-future--settle f :resolved (1+ (eval form)))))
                    f))))
       (let ((handle (sprite-fleet-each 'identity '(1 2 3)
                                        :sprites '("w1")

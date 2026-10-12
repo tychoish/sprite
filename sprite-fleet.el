@@ -125,16 +125,6 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
     (cond
      ((null sequence)
       (cons 0 (lambda () nil)))
-     ((listp sequence)
-      (let ((total (length sequence))
-            (remaining sequence))
-        (cons total
-              (lambda ()
-                (when remaining
-                  (let ((curr idx)
-                        (item (pop remaining)))
-                    (setq idx (1+ idx))
-                    (cons curr item)))))))
      ((vectorp sequence)
       (let ((total (length sequence)))
         (cons total
@@ -152,7 +142,30 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
                   (let ((curr idx))
                     (setq idx (1+ idx))
                     (cons curr (car v))))))))
-     ;; generator.el iterators or functions
+     ;; generator.el iterators, functions, or closures
+     ;; Note: in Emacs 29, closures satisfy `functionp' and `listp';
+     ;; checking `functionp' before `listp' prevents misidentifying
+     ;; generator iterators as lists.
+     ((functionp sequence)
+      (cons nil
+            (lambda ()
+              (condition-case nil
+                  (let ((item (iter-next sequence))
+                        (curr idx))
+                    (setq idx (1+ idx))
+                    (cons curr item))
+                (iter-end-of-sequence nil)
+                (error nil)))))
+     ((listp sequence)
+      (let ((total (length sequence))
+            (remaining sequence))
+        (cons total
+              (lambda ()
+                (when remaining
+                  (let ((curr idx)
+                        (item (pop remaining)))
+                    (setq idx (1+ idx))
+                    (cons curr item)))))))
      (t
       (cons nil
             (lambda ()
