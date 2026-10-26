@@ -103,7 +103,8 @@ with DBus support and systemd-logind.")
 
 (defun sprite-system--logind-available-p ()
   "Return non-nil when systemd-logind DBus integration is usable."
-  (and (fboundp 'dbus-register-signal)
+  (and (featurep 'dbusbind)
+       (fboundp 'dbus-register-signal)
        (eq system-type 'gnu/linux)))
 
 (defun sprite-system--on-prepare-for-sleep (going-to-sleep)

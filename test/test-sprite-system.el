@@ -257,9 +257,18 @@ Cancels any timer created during BODY on exit."
                  (if (eq sym 'dbus-register-signal) nil (fboundp sym)))))
       (should-not (sprite-system--logind-available-p)))))
 
+(ert-deftest sprite-system/logind-unavailable-without-dbusbind ()
+  "`sprite-system--logind-available-p' returns nil when Emacs lacks dbusbind."
+  (defvar features)
+  (let ((system-type 'gnu/linux)
+        (features (remq 'dbusbind features)))
+    (should-not (sprite-system--logind-available-p))))
+
 (ert-deftest sprite-system/logind-available-on-linux-with-dbus ()
   "`sprite-system--logind-available-p' returns non-nil on Linux with dbus."
-  (let ((system-type 'gnu/linux))
+  (defvar features)
+  (let ((system-type 'gnu/linux)
+        (features (cons 'dbusbind features)))
     (cl-letf (((symbol-function 'fboundp)
                (lambda (sym)
                  (if (eq sym 'dbus-register-signal) t (fboundp sym)))))
@@ -271,8 +280,10 @@ Cancels any timer created during BODY on exit."
 (ert-deftest sprite-system/start-logind-watch-calls-dbus-register ()
   "`sprite-system-start-logind-watch' calls `dbus-register-signal' on Linux."
   (sprite-system-test/with-clean-state
+    (defvar features)
     (let ((dbus-called nil)
-          (system-type 'gnu/linux))
+          (system-type 'gnu/linux)
+          (features (cons 'dbusbind features)))
       (cl-letf (((symbol-function 'fboundp)
                  (lambda (sym)
                    (if (eq sym 'dbus-register-signal) t (fboundp sym))))
@@ -307,8 +318,10 @@ Cancels any timer created during BODY on exit."
 (ert-deftest sprite-system/start-logind-watch-registers-all-signals ()
   "On Linux, `sprite-system-start-logind-watch' registers all sleep and lock/screensaver signals."
   (sprite-system-test/with-clean-state
+    (defvar features)
     (let ((register-calls nil)
           (system-type 'gnu/linux)
+          (features (cons 'dbusbind features))
           (orig-fboundp (symbol-function 'fboundp)))
       (cl-letf (((symbol-function 'fboundp)
                  (lambda (sym)
