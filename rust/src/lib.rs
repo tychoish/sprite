@@ -49,7 +49,7 @@ use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use sexp::Sexp;
+pub use sexp::{print_sexp, quote, Sexp};
 
 /// Errors that can occur while evaluating a form in a sprite.
 #[derive(Debug)]
