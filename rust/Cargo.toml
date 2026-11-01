@@ -5,6 +5,7 @@ edition = "2021"
 description = "Client library for the sprite-direct Emacs server wire protocol"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/tychoish/sprite"
+readme = "README.md"
 keywords = ["emacs", "server", "protocol"]
 # Micro-benchmarks are for local/CI use only, never for distribution:
 # criterion pulls in a nontrivial dependency tree that consumers of
