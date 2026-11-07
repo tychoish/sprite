@@ -174,6 +174,13 @@ Below is a complete ~use-package~ configuration block setting useful options wit
 - *Socket Timeouts*: ~sprite-direct-blocking-timeout~ defines the fail-safe timeout for synchronous expressions evaluated over direct sockets.
 - *Idle Monitoring*: ~sprite-system-idle-timeout~ governs how long user input must pause before ~sprite-system-idle-hook~ callbacks execute.
 
+** Instance state and desktop persistence
+
+Opt into instance-scoped paths and locks early, then enable desktop persistence
+at the desired late startup point.  Optional package mappings do not load or
+require those packages; all mappings and desktop support default to off.  See
+[[file:docs/instance-state.org][Instance State and Desktop Persistence]] for examples and lifecycle details.
+
 * Core Concepts and Architecture
 :PROPERTIES:
 :CUSTOM_ID: core-concepts-and-architecture
