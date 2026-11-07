@@ -34,7 +34,8 @@ No mappings are enabled by default; selecting one does not load its package."
   :group 'sprite-state)
 
 (defcustom sprite-state-auto-save-enabled nil
-  "When non-nil, `sprite-state-configure' sets up instance auto-save and backup paths."
+  "When non-nil, `sprite-state-configure' sets up instance auto-save.
+This also sets up instance backup paths."
   :type 'boolean
   :group 'sprite-state)
 
