@@ -33,6 +33,11 @@ No mappings are enabled by default; selecting one does not load its package."
   :type 'boolean
   :group 'sprite-state)
 
+(defcustom sprite-state-auto-save-enabled nil
+  "When non-nil, `sprite-state-configure' sets up instance auto-save and backup paths."
+  :type 'boolean
+  :group 'sprite-state)
+
 (defcustom sprite-state-desktop-enabled nil
   "When non-nil, `sprite-state-global-mode' persists named instance desktops.
 Set this before enabling the mode.  Solo instances never restore or save."
@@ -52,6 +57,8 @@ it is next enabled."
 (defvar sprite-state--active nil)
 (defvar sprite-state--restored-file nil)
 (defvar lock-file-name-transforms)
+(defvar auto-save-file-name-transforms)
+(defvar backup-directory-alist)
 (defvar desktop-base-file-name)
 (defvar desktop-base-lock-name)
 (defvar desktop-path)
@@ -81,7 +88,19 @@ Call before consumers initialize.  This does not load optional packages."
       (make-directory path t)
       (set-file-modes path #o700)
       (setq lock-file-name-transforms
-            `(("\\`/.*/\\([^/]+\\)\\'" ,(concat (file-name-as-directory path) "\\1") t))))))
+            `(("\\`/.*/\\([^/]+\\)\\'" ,(concat (file-name-as-directory path) "\\1") t)))))
+  (when sprite-state-auto-save-enabled
+    (sprite-state-setup-auto-save)))
+
+;;;###autoload
+(defun sprite-state-setup-auto-save ()
+  "Configure auto-save and backup directory paths for this instance."
+  (let ((path (sprite-state-path "backup/")))
+    (setq auto-save-file-name-transforms `((".*" ,path t)))
+    (add-to-list 'backup-directory-alist (cons "." path))
+    (unless (file-exists-p path)
+      (make-directory path t))
+    (set-file-modes path #o700)))
 
 (defun sprite-state--desktop-save ()
   "Save the desktop probabilistically, or after 150 seconds."

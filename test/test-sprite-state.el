@@ -20,6 +20,7 @@
           (user-login-name "tester")
           (sprite-state-mappings nil)
           (sprite-state-locks-enabled nil)
+          (sprite-state-auto-save-enabled nil)
           (sprite-state-desktop-enabled nil)
           (sprite-state-global-mode nil)
           (sprite-state--desktop-timer nil)
@@ -293,6 +294,18 @@
         (sprite-state-global-mode 1)
         (should (= reads 0))
         (sprite-state-global-mode -1)))))
+
+(ert-deftest sprite-state/auto-save-paths-configured ()
+  (sprite-state-test/with-directory
+    (let ((sprite-state-auto-save-enabled t)
+          (auto-save-file-name-transforms nil)
+          (backup-directory-alist nil))
+      (sprite-state-configure)
+      (let ((path (sprite-state-path "backup/")))
+        (should (file-directory-p path))
+        (should (= #o700 (file-modes path)))
+        (should (equal auto-save-file-name-transforms `((".*" ,path t))))
+        (should (member (cons "." path) backup-directory-alist))))))
 
 (provide 'test-sprite-state)
 ;;; test-sprite-state.el ends here

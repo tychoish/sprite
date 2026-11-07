@@ -1080,5 +1080,41 @@ and `sprite-communication-fallback' is non-nil."
            (restored (sprite--plist-to-struct (sprite--struct-to-plist s))))
       (should (null (sprite-startup restored))))))
 
+
+(ert-deftest sprite/execute-startup-operation-arity ()
+  "Call zero-arg functions with no args and optional-arg functions with 1."
+  (let ((calls nil))
+    (sprite--execute-startup-operation (lambda () (push 'zero calls)))
+    (sprite--execute-startup-operation (lambda (&optional arg) (push arg calls)))
+    (should (equal (reverse calls) '(zero 1)))))
+
+(ert-deftest sprite/execute-startup-operation-catches-error ()
+  "Do not propagate errors raised by operations."
+  (should (condition-case nil
+              (progn
+                (sprite--execute-startup-operation (lambda () (error "fail")))
+                t)
+            (error nil))))
+
+(ert-deftest sprite/run-startup-operations-batch-sync ()
+  "Non-interactive execution runs operations synchronously in order."
+  (let ((order nil)
+        (done nil)
+        (noninteractive t))
+    (sprite-run-startup-operations
+     (list (lambda () (push 1 order))
+           (lambda () (push 2 order)))
+     :on-done (lambda () (setq done t)))
+    (should (equal (reverse order) '(1 2)))
+    (should (eq done t))))
+
+(ert-deftest sprite/run-startup-operations-defaults-to-custom ()
+  "Default to `sprite-startup-operations' when no list is passed."
+  (let* ((order nil)
+         (noninteractive t)
+         (sprite-startup-operations (list (lambda () (push 'op order)))))
+    (sprite-run-startup-operations)
+    (should (equal order '(op)))))
+
 (provide 'test-sprite)
 ;;; test-sprite.el ends here

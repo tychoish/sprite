@@ -185,5 +185,69 @@ the raw instance id for top-level instances."
 If FULL-NAME is nil, returns path under the sprite root."
   (file-name-concat (sprite-state-directory :full-name full-name) name))
 
+
+;;;###autoload
+(defcustom sprite-startup-operations nil
+  "List of operations run in sequence during startup."
+  :type '(repeat function)
+  :group 'sprite)
+
+;;;###autoload
+(defcustom sprite-first-frame-operations nil
+  "List of operations run after the first frame is created."
+  :type '(repeat function)
+  :group 'sprite)
+
+(defun sprite--execute-startup-operation (fn &optional frame)
+  "Run startup operation FN in FRAME, reporting errors."
+  (condition-case err
+      (when (or (null frame) (frame-live-p frame))
+        (with-selected-frame (or frame (selected-frame))
+          (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
+            (autoload-do-load (symbol-function fn) fn))
+          (if (equal (cdr (func-arity fn)) 0)
+              (funcall fn)
+            (funcall fn 1))))
+    (error (message "[sprite] %s failed: %s" fn (error-message-string err)))))
+
+;;;###autoload
+(defun sprite-run-startup-operations (&optional operations &rest args)
+  "Run OPERATIONS in order, yielding between each in interactive sessions.
+OPERATIONS defaults to `sprite-startup-operations'.
+Supported ARGS keyword arguments:
+  :delay SECONDS (defaults to 0.1)
+  :on-done FUNCTION
+  :frame FRAME
+Return a cancellation function."
+  (let* ((ops (cond ((and (null operations) (null args))
+                     sprite-startup-operations)
+                    ((keywordp operations)
+                     (setq args (cons operations args))
+                     sprite-startup-operations)
+                    (t (or operations sprite-startup-operations))))
+         (delay (or (plist-get args :delay) 0.1))
+         (on-done (plist-get args :on-done))
+         (frame (plist-get args :frame)))
+    (if (or noninteractive (null ops))
+        (progn
+          (dolist (op ops)
+            (sprite--execute-startup-operation op frame))
+          (when on-done (funcall on-done))
+          #'ignore)
+      (let* ((queue (copy-sequence ops))
+             (timer nil)
+             (step nil))
+        (setq step (lambda ()
+                     (when queue
+                       (sprite--execute-startup-operation (pop queue) frame)
+                       (if queue
+                           (setq timer (run-with-idle-timer delay nil step))
+                         (when on-done (funcall on-done))))))
+        (setq timer (run-with-idle-timer delay nil step))
+        (lambda ()
+          (setq queue nil)
+          (when (timerp timer)
+            (cancel-timer timer)))))))
+
 (provide 'sprite)
 ;;; sprite.el ends here
