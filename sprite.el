@@ -198,16 +198,51 @@ If FULL-NAME is nil, returns path under the sprite root."
   :type '(repeat function)
   :group 'sprite)
 
+;;;###autoload
+(defcustom sprite-slow-op-reporting (and (bound-and-true-p init-file-debug) t)
+  "When non-nil, log timing statistics for startup operations."
+  :type 'boolean
+  :group 'sprite)
+
+;;;###autoload
+(defcustom sprite-slow-op-threshold 0.00001
+  "Threshold in seconds for logging startup operation durations."
+  :type 'number
+  :group 'sprite)
+
+;;;###autoload
+(defmacro with-sprite-slow-op-timer (name &rest body)
+  "Execute BODY, logging duration for NAME when reporting is enabled.
+Reporting is enabled when `sprite-slow-op-reporting' or `init-file-debug'
+is non-nil, and logged if duration exceeds `sprite-slow-op-threshold'."
+  (declare (indent 1) (debug (form body)))
+  `(if (not (or (bound-and-true-p sprite-slow-op-reporting)
+                (bound-and-true-p init-file-debug)))
+       (progn ,@body)
+     (let* ((start (current-time))
+            (res (let ((inhibit-message t)) ,@body))
+            (duration (float-time (time-since start)))
+            (threshold (if (boundp 'sprite-slow-op-threshold)
+                           sprite-slow-op-threshold
+                         0.00001)))
+       (when (> duration threshold)
+         (let ((inhibit-message t))
+           (message "[op]: <sprite> %s: %.06fs" ,name duration)))
+       res)))
+
 (defun sprite--execute-startup-operation (fn &optional frame)
-  "Run startup operation FN in FRAME, reporting errors."
+  "Run startup operation FN in FRAME, reporting errors.
+When `sprite-slow-op-reporting' or `init-file-debug' is non-nil,
+log operation duration if it exceeds `sprite-slow-op-threshold'."
   (condition-case err
       (when (or (null frame) (frame-live-p frame))
         (with-selected-frame (or frame (selected-frame))
           (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
             (autoload-do-load (symbol-function fn) fn))
-          (if (equal (cdr (func-arity fn)) 0)
-              (funcall fn)
-            (funcall fn 1))))
+          (with-sprite-slow-op-timer (format "[startup] %s" fn)
+            (if (equal (cdr (func-arity fn)) 0)
+                (funcall fn)
+              (funcall fn 1)))))
     (error (message "[sprite] %s failed: %s" fn (error-message-string err)))))
 
 ;;;###autoload

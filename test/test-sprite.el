@@ -1116,5 +1116,53 @@ and `sprite-communication-fallback' is non-nil."
     (sprite-run-startup-operations)
     (should (equal order '(op)))))
 
+(ert-deftest sprite/execute-startup-operation-timing-logged ()
+  "Log operation duration when `sprite-slow-op-reporting' is enabled."
+  (let ((logged nil)
+        (sprite-slow-op-reporting t)
+        (sprite-slow-op-threshold -1.0))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (sprite--execute-startup-operation (lambda () 'done))
+      (should (equal 1 (length logged)))
+      (should (string-prefix-p "[op]: <sprite> [startup]" (car logged))))))
+
+(ert-deftest sprite/execute-startup-operation-timing-skipped-when-disabled ()
+  "Do not emit timing messages when reporting is disabled."
+  (let ((logged nil)
+        (sprite-slow-op-reporting nil)
+        (init-file-debug nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (sprite--execute-startup-operation (lambda () 'done))
+      (should (null logged)))))
+
+(ert-deftest sprite/with-sprite-slow-op-timer-logs-when-enabled ()
+  "Log operation duration when `sprite-slow-op-reporting' is enabled."
+  (let ((logged nil)
+        (sprite-slow-op-reporting t)
+        (sprite-slow-op-threshold -1.0))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (let ((val (with-sprite-slow-op-timer "custom-task" (+ 10 20))))
+        (should (= val 30))
+        (should (equal 1 (length logged)))
+        (should (string-prefix-p "[op]: <sprite> custom-task:" (car logged)))))))
+
+(ert-deftest sprite/with-sprite-slow-op-timer-noop-when-disabled ()
+  "Return body value and do not emit messages when reporting is disabled."
+  (let ((logged nil)
+        (sprite-slow-op-reporting nil)
+        (init-file-debug nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (let ((val (with-sprite-slow-op-timer "custom-task" (+ 10 20))))
+        (should (= val 30))
+        (should (null logged))))))
+
 (provide 'test-sprite)
 ;;; test-sprite.el ends here
