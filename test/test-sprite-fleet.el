@@ -452,5 +452,51 @@
       (should (sprite-fleet-handle-p handle))
       (should (eq (sprite-fleet-handle-future handle) future)))))
 
+(ert-deftest sprite-fleet/worker-only-function-symbol ()
+  "Unbound local symbols are dispatched as remote function calls."
+  (let ((name 'sprite-fleet-test--remote-only))
+    (should-not (fboundp name))
+    (should (equal '(sprite-fleet-test--remote-only '42)
+                   (sprite-fleet--make-item-form name 42)))))
+
+(ert-deftest sprite-fleet/iterator-failure-rejects-and-cancels-workers ()
+  "An iterator error rejects the fleet and cancels outstanding work."
+  (let (worker)
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target _form)
+                 (setq worker (sprite-future--make :target target :state :pending)))))
+      (let* ((iterator (iter-make (iter-yield 1) (error "iterator failed")))
+             (handle (sprite-fleet-pool 'identity iterator :sprites '("a" "b")))
+             (future (sprite-fleet-handle-future handle)))
+        (sprite-fleet-test-wait-until (sprite-future-rejected-p future))
+        (should (equal '(:canceled :iterator-failed (error "iterator failed"))
+                       (sprite-future-value future)))
+        (should (sprite-future-rejected-p worker))))))
+
+(ert-deftest sprite-fleet/empty-on-done-error-is-reported ()
+  "Empty input handles callback errors like a nonempty fleet."
+  (let (warning)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (setq warning message))))
+      (let ((handle (sprite-fleet-pool 'identity nil
+                                       :on-done (lambda (_) (error "done failed")))))
+        (should (sprite-fleet-completed-p handle))
+        (should (sprite-future-resolved-p (sprite-fleet-handle-future handle)))
+        (should (string-match-p "done failed" warning))))))
+
+(ert-deftest sprite-fleet/log-is-opt-in-and-forwarded ()
+  "The fleet forwards an explicit logging request to its workers."
+  (let (options)
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target _form &rest keys)
+                 (push keys options)
+                 (let ((future (sprite-future--make :target target :state :pending)))
+                   (sprite-future--settle future :resolved t)
+                   future))))
+      (dolist (log '(nil t))
+        (let ((future (sprite-fleet-map 'identity '(1) :sprites '("a") :log log)))
+          (sprite-fleet-test-wait-until (sprite-future-resolved-p future))))
+      (should (equal '((:log t) nil) options)))))
+
 (provide 'test-sprite-fleet)
 ;;; test-sprite-fleet.el ends here

@@ -67,6 +67,7 @@
   delay              ; seconds between dispatches (default 0.0)
   order              ; 'preserve, 'fifo, 'lifo, 'unordered
   error-policy       ; :collect-nil, :collect-error, :abort
+  log                ; non-nil enables worker dispatch logging
   on-item            ; callback: (lambda (item result idx))
   on-done            ; callback: (lambda (results))
   results            ; vector (when total known & preserve) or alist/list
@@ -110,7 +111,7 @@ TOTAL may be nil if input sequence was a lazy iterator of unknown size."
 (defun sprite-fleet--make-item-form (fn-or-form item)
   "Construct expression to evaluate FN-OR-FORM for ITEM."
   (cond
-   ((and (symbolp fn-or-form) (fboundp fn-or-form))
+   ((symbolp fn-or-form)
     `(,fn-or-form ',item))
    ((and (consp fn-or-form) (eq (car fn-or-form) 'lambda))
     `(funcall ',fn-or-form ',item))
@@ -154,8 +155,7 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
                         (curr idx))
                     (setq idx (1+ idx))
                     (cons curr item))
-                (iter-end-of-sequence nil)
-                (error nil)))))
+                (iter-end-of-sequence nil)))))
      ((listp sequence)
       (let ((total (length sequence))
             (remaining sequence))
@@ -174,8 +174,7 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
                         (curr idx))
                     (setq idx (1+ idx))
                     (cons curr item))
-                (iter-end-of-sequence nil)
-                (error nil))))))))
+                (iter-end-of-sequence nil))))))))
 
 (defun sprite-fleet--format-error (err target)
   "Format error ERR from TARGET according to fleet error policy."
@@ -238,17 +237,22 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
   (when (sprite-fleet-running-p handle)
     (let ((target (car (sprite-fleet-handle-available-targets handle))))
       (if (and target (not (sprite-fleet-handle-exhausted-p handle)))
-          (let ((next (funcall (sprite-fleet-handle-iterator handle))))
-            (if (null next)
-                (progn
-                  (setf (sprite-fleet-handle-exhausted-p handle) t)
-                  (when (= 0 (hash-table-count (sprite-fleet-handle-active-workers handle)))
-                    (sprite-fleet--finalize handle)))
-              (pop (sprite-fleet-handle-available-targets handle))
-              (sprite-fleet--dispatch-worker handle target (car next) (cdr next))
-              (when (and (sprite-fleet-handle-available-targets handle)
-                         (not (sprite-fleet-handle-exhausted-p handle)))
-                (sprite-fleet--schedule-step handle))))
+          (let ((next (condition-case err
+                          (funcall (sprite-fleet-handle-iterator handle))
+                        (error
+                         (sprite-fleet-cancel handle (list :iterator-failed err))
+                         nil))))
+            (when (sprite-fleet-running-p handle)
+              (if (null next)
+                  (progn
+                    (setf (sprite-fleet-handle-exhausted-p handle) t)
+                    (when (= 0 (hash-table-count (sprite-fleet-handle-active-workers handle)))
+                      (sprite-fleet--finalize handle)))
+                (pop (sprite-fleet-handle-available-targets handle))
+                (sprite-fleet--dispatch-worker handle target (car next) (cdr next))
+                (when (and (sprite-fleet-handle-available-targets handle)
+                           (not (sprite-fleet-handle-exhausted-p handle)))
+                  (sprite-fleet--schedule-step handle)))))
         (when (and (sprite-fleet-handle-exhausted-p handle)
                    (= 0 (hash-table-count (sprite-fleet-handle-active-workers handle))))
           (sprite-fleet--finalize handle))))))
@@ -258,7 +262,9 @@ NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil."
   (cl-incf (sprite-fleet-handle-dispatched-count handle))
   (let* ((form (sprite-fleet--make-item-form (sprite-fleet-handle-fn-or-form handle) item))
          (future (condition-case err
-                     (sprite-future-eval target form)
+                     (if (sprite-fleet-handle-log handle)
+                         (sprite-future-eval target form :log t)
+                       (sprite-future-eval target form))
                    (error
                     (let ((f (sprite-future--make :target target :state :pending)))
                       (sprite-future--settle f :rejected err)
@@ -370,7 +376,7 @@ TIMEOUT overrides `sprite-direct-blocking-timeout'."
 (cl-defun sprite-fleet-pool (fn-or-form items
                              &key fleet-size sprites (delay 0.0)
                                   (order 'preserve) (error-policy :collect-nil)
-                                  on-item on-done)
+                                  on-item on-done log)
   "Create and start a `sprite-fleet-handle' executing FN-OR-FORM over ITEMS.
 FLEET-SIZE is the maximum number of concurrent sprites.
 SPRITES is a list of sprite structs or target name strings.
@@ -381,6 +387,7 @@ ERROR-POLICY specifies failure behavior: `:collect-nil' (default),
 `:collect-error', or `:abort'.
 ON-ITEM is an optional callback (lambda (item result idx)).
 ON-DONE is an optional callback (lambda (results)).
+LOG enables logging of each worker dispatch and outcome.
 
 Returns a `sprite-fleet-handle'."
   (cl-check-type order (member preserve fifo lifo unordered))
@@ -417,6 +424,7 @@ Returns a `sprite-fleet-handle'."
                   :delay (or delay 0.0)
                   :order order
                   :error-policy error-policy
+                  :log log
                   :on-item on-item
                   :on-done on-done
                   :results results
@@ -424,9 +432,7 @@ Returns a `sprite-fleet-handle'."
     (puthash overall-future handle sprite-fleet--handle-by-future)
     (cond
      (empty-p
-      (setf (sprite-fleet-handle-state handle) :completed)
-      (sprite-future--settle overall-future :resolved nil)
-      (when on-done (funcall on-done nil)))
+      (sprite-fleet--finalize handle))
      ((null target-names)
       (setf (sprite-fleet-handle-state handle) :completed)
       (sprite-future--settle overall-future :rejected "No available sprites"))
@@ -438,7 +444,7 @@ Returns a `sprite-fleet-handle'."
 (cl-defun sprite-fleet-map (fn-or-form items
                             &key fleet-size sprites (delay 0.0)
                                  (order 'preserve) (error-policy :collect-nil)
-                                 on-item on-done wait timeout (async t))
+                                 on-item on-done wait timeout (async t) log)
   "Evaluate FN-OR-FORM over ITEMS across a fleet of sprites.
 By default returns a `sprite-future' that resolves to the ordered results.
 The future's controller is accessible via `sprite-future-fleet-handle'.
@@ -452,7 +458,8 @@ the results."
                                     :order order
                                     :error-policy error-policy
                                     :on-item on-item
-                                    :on-done on-done))
+                                    :on-done on-done
+                                    :log log))
          (future (sprite-fleet-handle-future handle)))
     (if (or wait (not async))
         (sprite-fleet-wait future timeout)
@@ -462,7 +469,7 @@ the results."
 (cl-defun sprite-fleet-each (fn-or-form items
                              &key fleet-size sprites (delay 0.0)
                                   (error-policy :collect-nil)
-                                  on-item on-done)
+                                  on-item on-done log)
   "Stream evaluation of FN-OR-FORM over ITEMS across a fleet of sprites.
 Returns the controller `sprite-fleet-handle' immediately for flow control
 (`sprite-fleet-pause', `sprite-fleet-resume', `sprite-fleet-cancel').
@@ -474,13 +481,14 @@ Results are streamed to ON-ITEM as each worker completes."
                      :order 'unordered
                      :error-policy error-policy
                      :on-item on-item
-                     :on-done on-done))
+                     :on-done on-done
+                     :log log))
 
 ;;;###autoload
 (cl-defun sprite-fleet-mapcar (fn-or-form items
                                &key fleet-size sprites timeout async (delay 0.0)
                                     (order 'preserve) (error-policy :collect-nil)
-                                    on-item on-done)
+                                    on-item on-done log)
   "Evaluate FN-OR-FORM for each item in ITEMS using a fleet of sprites.
 Mirrors `mapcar' across the daemon fleet.
 
@@ -494,7 +502,8 @@ Delegates to `sprite-fleet-pool' and the yielding stepper engine."
                                     :order order
                                     :error-policy error-policy
                                     :on-item on-item
-                                    :on-done on-done))
+                                    :on-done on-done
+                                    :log log))
          (future (sprite-fleet-handle-future handle)))
     (if async
         future
