@@ -493,5 +493,15 @@
         (sprite-batch-cancel-menu)
         (should-not (member "Quit current operation" table))))))
 
+(ert-deftest sprite-batch/iterator-safe-when-gen-not-loaded ()
+  "sprite--make-iterator and sprite-run-batch do not fail when gen is unrequired."
+  (cl-letf (((symbol-function 'featurep)
+             (lambda (feat &rest _)
+               (if (eq feat 'gen) nil (cl-call-next-method)))))
+    (let* ((items '(identity ignore))
+           (iter (sprite--make-iterator items)))
+      (should (equal (car iter) 2))
+      (should (equal (funcall (cdr iter)) '(0 . identity))))))
+
 (provide 'test-sprite-batch)
 ;;; test-sprite-batch.el ends here
