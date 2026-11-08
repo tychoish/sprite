@@ -43,6 +43,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      GOFLAGS: ${{ matrix.client == 'go' && '-buildvcs=false' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -50,6 +52,15 @@ jobs:
         emacs-version: ["29.4", "30.2", "31.1"]
     steps:
       - uses: actions/checkout@v5
+      - name: Update package index
+        if: matrix.client == 'javascript' || matrix.client == 'rust'
+        run: apt-get update
+      - name: Install JavaScript system dependencies
+        if: matrix.client == 'javascript'
+        run: apt-get install -y libatomic1
+      - name: Install Rust system dependencies
+        if: matrix.client == 'rust'
+        run: apt-get install -y build-essential
       - uses: actions/setup-python@v5
         if: matrix.client == 'python'
         with:
@@ -76,6 +87,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      GOFLAGS: -buildvcs=false
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v5
@@ -106,6 +119,12 @@ jobs:
       - name: Mark benchmark as run today
         if: github.event_name == 'push' && steps.throttle.outputs.cache-hit != 'true'
         run: touch .bench-ran
+
+      - name: Install benchmark system dependencies
+        if: steps.should-run.outputs.run == 'true'
+        run: |
+          apt-get update
+          apt-get install -y build-essential libatomic1
 
       - uses: actions/setup-python@v5
         if: steps.should-run.outputs.run == 'true'
