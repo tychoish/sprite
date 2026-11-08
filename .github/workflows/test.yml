@@ -34,111 +34,45 @@ jobs:
       - name: Run Tests
         uses: tychoish/elisp-ci@v0.1.0
 
-  # Unit + live-daemon integration tests for the sprite-direct client
-  # libraries (python/, js/, go, rust/) and the Go CLI (cmd/sprite).
+  # Each client runs its unit, integration, and timeout tests against every
+  # supported Emacs version. The Go suite also exercises the CLI.
   sprite-clients:
+    name: ${{ matrix.client }} / Emacs ${{ matrix.emacs-version }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    container: silex/emacs:${{ matrix.emacs-version }}-ci
+    timeout-minutes: 15
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [python, javascript, go, rust]
+        emacs-version: ["29.4", "30.2", "31.1"]
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install Emacs
-        run: sudo apt-get update && sudo apt-get install -y emacs-nox
-
       - uses: actions/setup-python@v5
+        if: matrix.client == 'python'
         with:
           python-version: "3.x"
       - uses: actions/setup-node@v5
+        if: matrix.client == 'javascript'
         with:
           node-version: "lts/*"
       - uses: actions/setup-go@v5
+        if: matrix.client == 'go'
         with:
           go-version-file: go.mod
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Unit tests -- Python
-        working-directory: python
-        run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install -e . pytest
-          pytest -q
-
-      - name: Unit tests -- JavaScript
-        working-directory: js
-        run: npm test
-
-      - name: Unit tests -- Go (library + CLI)
-        run: go build ./... && go vet ./... && go test ./...
-
-      - name: Unit tests -- Rust
-        working-directory: rust
-        run: cargo test --features async
-
-      - name: Spawn a test daemon
-        run: |
-          mkdir -p "$RUNNER_TEMP/sprite-xdg-runtime"
-          chmod 700 "$RUNNER_TEMP/sprite-xdg-runtime"
-          # loads sprite-async.el into the no-init-file daemon so the async tests can reach it
-          XDG_RUNTIME_DIR="$RUNNER_TEMP/sprite-xdg-runtime" \
-            emacs --daemon=ci.0.sprite --no-init-file --no-site-file \
-            --eval "(load-file \"$GITHUB_WORKSPACE/sprite-async.el\")" &
-          sock="$RUNNER_TEMP/sprite-xdg-runtime/emacs/ci.0.sprite"
-          for _ in $(seq 1 30); do
-            [ -S "$sock" ] && break
-            sleep 0.5
-          done
-          [ -S "$sock" ] || { echo "daemon socket never appeared" >&2; exit 1; }
-          echo "SPRITE_TEST_SOCKET=$sock" >> "$GITHUB_ENV"
-          echo "SPRITE_SOCKET_DIR=$RUNNER_TEMP/sprite-xdg-runtime/emacs" >> "$GITHUB_ENV"
-
-      - name: Integration tests -- Python
-        working-directory: python
-        run: |
-          . .venv/bin/activate
-          pytest -q tests/test_integration.py tests/test_async_integration.py -v
-
-      - name: Integration tests -- JavaScript
-        working-directory: js
-        run: node --test test/integration.test.js test/async_integration.test.js
-
-      - name: Integration tests -- Go
-        run: go test ./go/protocol/... -run LiveDaemon -v
-
-      - name: Integration tests -- Rust
-        working-directory: rust
-        run: cargo test --features async --test integration -- --nocapture
-
-      - name: Integration smoke test -- CLI
-        run: |
-          go run ./cmd/sprite call ci.0.sprite '+' --args '[1,2]'
-          go run ./cmd/sprite eval ci.0.sprite '(+ 3 4)'
-
-      # each timeout suite spawns its own disposable daemon, so these can run alongside the integration tests
-      - name: Timeout tests -- Python
-        working-directory: python
-        run: |
-          . .venv/bin/activate
-          pytest -q tests/test_timeout.py -v
-
-      - name: Timeout tests -- JavaScript
-        working-directory: js
-        run: node --test test/timeout.test.js
-
-      - name: Timeout tests -- Go
-        run: go test ./go/protocol/... -run 'TimeoutFires|TimeoutConfigured|TimesOutDistinctly|NonexistentSocket' -v
-
-      - name: Timeout tests -- Rust
-        working-directory: rust
-        run: cargo test --test timeout -- --nocapture
+        if: matrix.client == 'rust'
+      - name: Run client tests
+        run: emacs --batch -l scripts/ci/sprite-ci.el -f sprite-ci-main test ${{ matrix.client }}
 
   # Per-language micro-benchmarks (EvalBlocking vs. an `emacsclient
   # --eval` subprocess baseline), throttled to once per UTC day on push;
   # never gates a merge, so each benchmark step uses continue-on-error.
   sprite-bench:
     runs-on: ubuntu-latest
+    container: silex/emacs:30.2-ci
     timeout-minutes: 15
     permissions:
       contents: read
@@ -173,10 +107,6 @@ jobs:
         if: github.event_name == 'push' && steps.throttle.outputs.cache-hit != 'true'
         run: touch .bench-ran
 
-      - name: Install Emacs
-        if: steps.should-run.outputs.run == 'true'
-        run: sudo apt-get update && sudo apt-get install -y emacs-nox
-
       - uses: actions/setup-python@v5
         if: steps.should-run.outputs.run == 'true'
         with:
@@ -192,67 +122,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: steps.should-run.outputs.run == 'true'
 
-      - name: Spawn a disposable daemon
+      - name: Benchmarks
         if: steps.should-run.outputs.run == 'true'
-        run: |
-          mkdir -p "$RUNNER_TEMP/sprite-bench-xdg"
-          chmod 700 "$RUNNER_TEMP/sprite-bench-xdg"
-          XDG_RUNTIME_DIR="$RUNNER_TEMP/sprite-bench-xdg" \
-            emacs --fg-daemon=bench.0.sprite --no-init-file --no-site-file &
-          sock="$RUNNER_TEMP/sprite-bench-xdg/emacs/bench.0.sprite"
-          for _ in $(seq 1 30); do
-            [ -S "$sock" ] && break
-            sleep 0.5
-          done
-          [ -S "$sock" ] || { echo "daemon socket never appeared" >&2; exit 1; }
-          echo "SPRITE_TEST_SOCKET=$sock" >> "$GITHUB_ENV"
-
-      - name: Benchmark -- Go
-        if: steps.should-run.outputs.run == 'true'
-        continue-on-error: true
-        run: |
-          {
-            echo '## Go'
-            echo '```'
-            go test ./go/protocol/... -run '^$' -bench . -benchmem
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Benchmark -- Python
-        if: steps.should-run.outputs.run == 'true'
-        continue-on-error: true
-        working-directory: python
-        run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install -e '.[bench]'
-          {
-            echo '## Python'
-            echo '```'
-            pytest tests/test_bench.py --benchmark-only -v
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Benchmark -- JavaScript
-        if: steps.should-run.outputs.run == 'true'
-        continue-on-error: true
-        working-directory: js
-        run: |
-          {
-            echo '## JavaScript'
-            echo '```'
-            node bench/bench.js
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Benchmark -- Rust
-        if: steps.should-run.outputs.run == 'true'
-        continue-on-error: true
-        working-directory: rust
-        run: |
-          {
-            echo '## Rust'
-            echo '```'
-            cargo bench --bench eval_bench
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+        run: emacs --batch -l scripts/ci/sprite-ci.el -f sprite-ci-main bench
