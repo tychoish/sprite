@@ -1131,12 +1131,20 @@ and `sprite-communication-fallback' is non-nil."
         (done nil)
         (noninteractive t))
     (sprite-run
-     (list (lambda () (push 'zero results))
-           (lambda (x y) (push (+ x y) results)))
+     :operations (list (lambda () (push 'zero results))
+                       (lambda (x y) (push (+ x y) results)))
      :arglist '(10 20)
+     :log-prefix "[test-run]"
      :on-done (lambda () (setq done t)))
     (should (equal (reverse results) '(zero 30)))
     (should (eq done t))))
+
+(ert-deftest sprite/run-generic-ops-alias ()
+  "sprite-run accepts :ops as an alias for :operations."
+  (let ((results nil)
+        (noninteractive t))
+    (sprite-run :ops (list (lambda () (push 'ok results))))
+    (should (equal results '(ok)))))
 
 (defvar sprite-test--fake-hook nil)
 
@@ -1146,11 +1154,11 @@ and `sprite-communication-fallback' is non-nil."
          (noninteractive t)
          (sprite-test--fake-hook (list (lambda (arg) (push (cons 1 arg) order))
                                        (lambda (arg) (push (cons 2 arg) order)))))
-    (sprite-run 'sprite-test--fake-hook :arglist 'active)
+    (sprite-run :operations 'sprite-test--fake-hook :arglist 'active)
     (should (equal (reverse order) '((1 . active) (2 . active))))))
 
 (ert-deftest sprite/run-generic-initial-delay-and-cancellation ()
-  "sprite-run schedules with initial-delay and cancellation stops execution."
+  "sprite-run schedules with run-after and cancellation stops execution."
   (let ((noninteractive nil)
         (executed nil)
         (timers nil))
@@ -1162,13 +1170,31 @@ and `sprite-communication-fallback' is non-nil."
               ((symbol-function 'cancel-timer)
                (lambda (timer)
                  (setq timers (delete timer timers)))))
-      ;; Test :run-after / :initial-delay
-      (let ((cancel-fn (sprite-run (list (lambda () (setq executed t)))
+      ;; Test :run-after
+      (let ((cancel-fn (sprite-run :operations (list (lambda () (setq executed t)))
                                    :run-after 2.5
                                    :delay 0.5)))
         ;; Timer was registered with 2.5
         (should (= (caar timers) 2.5))
         ;; Calling cancellation function cancels timer
+        (funcall cancel-fn)
+        (should (null timers))))))
+
+(ert-deftest sprite/run-startup-operations-with-run-after ()
+  "sprite-run-startup-operations forwards :run-after to sprite-run."
+  (let ((sprite-startup-operations (list (lambda () t)))
+        (noninteractive nil)
+        (timers nil))
+    (cl-letf (((symbol-function 'run-with-idle-timer)
+               (lambda (secs repeat fn &rest args)
+                 (let ((rec (list secs fn)))
+                   (push rec timers)
+                   rec)))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (setq timers (delete timer timers)))))
+      (let ((cancel-fn (sprite-run-startup-operations :run-after 3.5 :delay 0.2)))
+        (should (= (caar timers) 3.5))
         (funcall cancel-fn)
         (should (null timers))))))
 

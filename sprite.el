@@ -230,19 +230,19 @@ is non-nil, and logged if duration exceeds `sprite-slow-op-threshold'."
            (message "[op]: <sprite> %s: %.06fs" ,name duration)))
        res)))
 
-(defun sprite--execute-operation (fn &optional arglist frame log-tag)
+(defun sprite--execute-operation (fn &optional arglist frame log-prefix)
   "Run operation FN with ARGLIST in FRAME, reporting errors.
 When `sprite-slow-op-reporting' or `init-file-debug' is non-nil,
-log operation duration with LOG-TAG if it exceeds `sprite-slow-op-threshold'."
+log operation duration with LOG-PREFIX if it exceeds `sprite-slow-op-threshold'."
   (condition-case err
       (when (or (null frame) (frame-live-p frame))
         (with-selected-frame (or frame (selected-frame))
           (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
             (autoload-do-load (symbol-function fn) fn))
-          (with-sprite-slow-op-timer (format "%s %s" (or log-tag "[run]") fn)
+          (with-sprite-slow-op-timer (format "%s %s" (or log-prefix "[run]") fn)
             (if (equal (cdr (func-arity fn)) 0)
                 (funcall fn)
-              (apply fn (if (listp arglist) arglist (list arglist)))))))
+              (apply fn (ensure-list arglist))))))
     (error (message "[sprite] %s failed: %s" fn (error-message-string err)))))
 
 (defun sprite--execute-startup-operation (fn &optional frame)
@@ -252,12 +252,15 @@ log operation duration if it exceeds `sprite-slow-op-threshold'."
   (sprite--execute-operation fn '(1) frame "[startup]"))
 
 ;;;###autoload
-(defun sprite-run (&optional operations &rest args)
+(cl-defun sprite-run (&key operations ops (delay 0.1) run-after initial-delay
+                           arglist on-done frame (log-prefix "[run]"))
   "Run OPERATIONS in order, yielding between each in interactive sessions.
-OPERATIONS may be a list of functions, a single function, or a symbol
-whose value is a list of functions (such as a hook).
+OPERATIONS (or OPS) may be a list of functions, a single function,
+or a symbol whose value is a list of functions (such as a hook).
 
-Supported ARGS keyword arguments:
+Supported keyword arguments:
+  :operations or :ops
+    List of operations, single function, or hook symbol.
   :run-after or :initial-delay SECONDS
     Initial delay before the first operation (defaults to :delay).
   :delay SECONDS
@@ -268,46 +271,35 @@ Supported ARGS keyword arguments:
     Callback invoked when all operations finish.
   :frame FRAME
     Optional frame context for `with-selected-frame'.
-  :log-tag STRING
-    Timer log tag prefix (defaults to \"[run]\").
+  :log-prefix STRING
+    Timer log prefix (defaults to \"[run]\").
 
 In noninteractive (batch) sessions, runs all operations synchronously.
 Return a cancellation function."
-  (when (keywordp operations)
-    (setq args (cons operations args)
-          operations nil))
-  (let* ((ops-source (or operations (plist-get args :operations)))
-         (ops (cond ((and (symbolp ops-source) (boundp ops-source)
-                          (listp (symbol-value ops-source)))
-                     (symbol-value ops-source))
-                    ((listp ops-source)
-                     ops-source)
-                    (t (ensure-list ops-source))))
-         (delay (or (plist-get args :delay) 0.1))
-         (initial-delay (or (plist-get args :run-after)
-                            (plist-get args :initial-delay)
-                            delay))
-         (raw-args (plist-get args :arglist))
-         (arglist (if (listp raw-args) raw-args (list raw-args)))
-         (on-done (plist-get args :on-done))
-         (frame (plist-get args :frame))
-         (log-tag (or (plist-get args :log-tag) "[run]")))
-    (if (or noninteractive (null ops))
+  (let* ((source (or operations ops))
+         (items (cond ((and (symbolp source) (boundp source)
+                            (listp (symbol-value source)))
+                       (symbol-value source))
+                      (t (ensure-list source))))
+         (wait (or run-after initial-delay delay))
+         (args (ensure-list arglist)))
+    (if (or noninteractive (null items))
         (progn
-          (dolist (op ops)
-            (sprite--execute-operation op arglist frame log-tag))
+          (seq-do (lambda (op)
+                    (sprite--execute-operation op args frame log-prefix))
+                  items)
           (when on-done (funcall on-done))
           #'ignore)
-      (let* ((queue (copy-sequence ops))
+      (let* ((queue (copy-sequence items))
              (timer nil)
              (step nil))
         (setq step (lambda ()
                      (when queue
-                       (sprite--execute-operation (pop queue) arglist frame log-tag)
+                       (sprite--execute-operation (pop queue) args frame log-prefix)
                        (if queue
                            (setq timer (run-with-idle-timer delay nil step))
                          (when on-done (funcall on-done))))))
-        (setq timer (run-with-idle-timer initial-delay nil step))
+        (setq timer (run-with-idle-timer wait nil step))
         (lambda ()
           (setq queue nil)
           (when timer
@@ -315,22 +307,18 @@ Return a cancellation function."
 
 ;;;###autoload
 (defun sprite-run-startup-operations (&optional operations &rest args)
-  "Run OPERATIONS in order, yielding between each in interactive sessions.
+  "Run startup OPERATIONS yielding between each in interactive sessions.
 OPERATIONS defaults to `sprite-startup-operations'.
-Supported ARGS keyword arguments:
-  :delay SECONDS (defaults to 0.1)
-  :run-after or :initial-delay SECONDS
-  :on-done FUNCTION
-  :frame FRAME
-Return a cancellation function."
-  (let* ((ops (cond ((and (null operations) (null args))
-                     sprite-startup-operations)
-                    ((keywordp operations)
-                     (setq args (cons operations args))
-                     sprite-startup-operations)
-                    (t (or operations sprite-startup-operations)))))
-    (apply #'sprite-run ops
-           (append args (list :arglist '(1) :log-tag "[startup]")))))
+Supported ARGS keyword arguments include :delay, :run-after, :on-done, :frame.
+Specialized case of `sprite-run' with default arglist `(1)' and log
+prefix \"[startup]\"."
+  (let ((kwargs (if (keywordp operations)
+                    (cons operations args)
+                  (append (list :operations (or operations sprite-startup-operations))
+                          args))))
+    (apply #'sprite-run (append kwargs (list :operations sprite-startup-operations
+                                             :arglist '(1)
+                                             :log-prefix "[startup]")))))
 
 (provide 'sprite)
 ;;; sprite.el ends here

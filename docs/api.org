@@ -176,18 +176,18 @@ Execute /BODY/, logging duration for /NAME/ when reporting is enabled. Reporting
 :CUSTOM_ID: sprite-run
 :END:
 
-: (fn &optional OPERATIONS &rest ARGS)
+: (fn &key OPERATIONS OPS (DELAY 0.1) RUN-AFTER INITIAL-DELAY ARGLIST ON-DONE FRAME (LOG-PREFIX "[run]"))
 
-Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ may be a list of functions, a single function, or a symbol whose value is a list of functions (such as a hook). Supported /ARGS/ keyword arguments: :run-after or :initial-delay SECONDS (defaults to :delay) :delay SECONDS (defaults to 0.1) :arglist LIST or ATOM (arguments passed to non-nilary operations) :on-done FUNCTION :frame FRAME :log-tag STRING (defaults to "[run]"). In noninteractive (batch) sessions, runs all operations synchronously. Return a cancellation function.
+Run /OPERATIONS/ (or /OPS/) in order, yielding between each in interactive sessions. /OPERATIONS/ may be a list of functions, a single function, or a symbol whose value is a list of functions (such as a hook). Supported keyword arguments: :operations or :ops, :run-after or :initial-delay SECONDS (defaults to :delay), :delay SECONDS (defaults to 0.1), :arglist LIST or ATOM (arguments passed to non-nilary operations), :on-done FUNCTION, :frame FRAME, :log-prefix STRING (defaults to "[run]"). In noninteractive (batch) sessions, runs all operations synchronously. Return a cancellation function.
 
-*** [[file:../sprite.el::317][sprite-run-startup-operations]]
+*** [[file:../sprite.el::309][sprite-run-startup-operations]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-run-startup-operations
 :END:
 
 : (fn &optional OPERATIONS &rest ARGS)
 
-Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ defaults to ~sprite-startup-operations~. Supported /ARGS/ keyword arguments: :delay SECONDS (defaults to 0.1) :run-after or :initial-delay SECONDS :on-done FUNCTION :frame FRAME Return a cancellation function. Special case of ~sprite-run~ with default arglist ~'(1)~ and log tag ~"[startup]"~.
+Run startup /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ defaults to ~sprite-startup-operations~. Supported /ARGS/ keyword arguments include :delay SECONDS (defaults to 0.1), :run-after or :initial-delay SECONDS, :on-done FUNCTION, :frame FRAME. Specialized case of ~sprite-run~ with default arglist ~'(1)~ and log prefix ~"[startup]"~.
 
 ** sprite-direct
 
