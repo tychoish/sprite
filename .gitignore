@@ -16,3 +16,4 @@ js/node_modules/
 
 # Rust
 rust/target/
+/build/
