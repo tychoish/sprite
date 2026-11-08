@@ -53,6 +53,8 @@
   state           ; :pending :resolved :rejected
   value
   callbacks       ; list of (on-resolve . on-reject), applied in order on settle
+  log
+  remote-dispatch ; non-nil for futures created by `sprite-future-eval'
   backend-handle) ; sprite-direct-promise, or a process for the emacsclient path
 
 ;;;; Predicates
@@ -82,12 +84,19 @@ code from the `emacsclient' process."
    ((and (sprite-future-rejected-p future) (cdr cb))
     (funcall (cdr cb) (sprite-future-value future)))))
 
-(defun sprite-future--settle (future state value)
+(defun sprite-future--settle (future state value &optional before-callbacks)
   "Transition FUTURE to STATE with VALUE, then run its pending callbacks.
+Call BEFORE-CALLBACKS after the transition and before running callbacks.
 No-op if FUTURE has already settled."
   (when (sprite-future-pending-p future)
+    (when (and (sprite-future-remote-dispatch future)
+               (sprite-future-log future))
+      (sprite--log (sprite-future-target future)
+                   (if (eq state :rejected) 'error 'received)
+                   (format "%S" value)))
     (setf (sprite-future-state future) state
           (sprite-future-value future) value)
+    (when before-callbacks (funcall before-callbacks))
     (let ((callbacks (sprite-future-callbacks future)))
       (setf (sprite-future-callbacks future) nil)
       (seq-do (lambda (cb) (sprite-future--run-callback future cb)) callbacks))))
@@ -144,9 +153,9 @@ TIMEOUT overrides `sprite-direct-blocking-timeout'; nil waits indefinitely."
          (limit (or timeout sprite-direct-blocking-timeout))
          (deadline (when limit (+ (float-time) limit))))
     (while (and (sprite-future-pending-p future)
-                (or (null deadline) (< (float-time) deadline))
-                (or (null proc) (process-live-p proc)))
-      (accept-process-output proc sprite-direct-async-check-interval nil t))
+                (or (null deadline) (< (float-time) deadline)))
+      (accept-process-output (when (and proc (process-live-p proc)) proc)
+                             sprite-direct-async-check-interval nil t))
     (sprite-future-value future)))
 
 (defun sprite-future-cancel (future &optional reason)
@@ -155,9 +164,11 @@ Transitions FUTURE to :rejected with (cons :canceled (or reason :user-cancel)).
 Returns t if cancelled, nil if already settled."
   (when (sprite-future-pending-p future)
     (let ((proc (sprite-future--handle-process future)))
-      (when (and proc (process-live-p proc))
-        (delete-process proc)))
-    (sprite-future--settle future :rejected (cons :canceled (or reason :user-cancel)))
+      (sprite-future--settle
+       future :rejected (cons :canceled (or reason :user-cancel))
+       (lambda ()
+         (when (and proc (process-live-p proc))
+           (delete-process proc)))))
     t))
 
 ;;;; Backend: direct socket
@@ -213,15 +224,49 @@ any other exit code rejects FUTURE.  Kills PROC's buffer afterward."
 
 ;;;; Entry point
 
-(defun sprite-future-eval (target form)
+(cl-defun sprite-future-eval (target form &key log)
   "Evaluate FORM in sprite TARGET asynchronously; return a `sprite-future'.
 Dispatches on `sprite-communication-backend', the same way
-`sprite--call-and-read' does for the synchronous API."
-  (let ((future (sprite-future--make :target target :state :pending :callbacks nil)))
-    (pcase sprite-communication-backend
-      ('direct (sprite-future--eval-direct future form))
-      (_ (sprite-future--spawn-emacsclient target form future)))
+`sprite--call-and-read' does for the synchronous API.  When LOG is non-nil,
+log dispatch and outcome in TARGET's buffer."
+  (when log
+    (sprite--log target 'sent (format "%S" form)))
+  (let ((future (sprite-future--make :target target :state :pending
+                                     :remote-dispatch t :log log)))
+    (condition-case err
+        (pcase sprite-communication-backend
+          ('direct (sprite-future--eval-direct future form))
+          (_ (sprite-future--spawn-emacsclient target form future)))
+      (error
+       (when (and log (sprite-future-pending-p future))
+         (sprite--log target 'error (error-message-string err)))
+       (signal (car err) (cdr err))))
     future))
+
+(defun sprite-future--warn-callback (callback)
+  "Wrap CALLBACK to report errors before propagating them to the chain."
+  (when callback
+    (lambda (value)
+      (condition-case err
+          (funcall callback value)
+        (error
+         (display-warning 'sprite (format "Async callback failed: %s"
+                                          (error-message-string err)) :warning)
+         (signal (car err) (cdr err)))))))
+
+(cl-defmacro with-sprite-async (name form &key on-resolve on-reject log)
+  "Evaluate FORM asynchronously in sprite NAME and return its future.
+FORM is sent literally, as in `with-sprite'.  ON-RESOLVE and ON-REJECT,
+when supplied, are callbacks for the outcome.  Callback errors are reported
+as warnings.  LOG enables logging."
+  (declare (indent 1))
+  (let ((future (make-symbol "future")))
+    `(let ((,future (sprite-future-eval ,name ',form :log ,log)))
+       ,@(when (or on-resolve on-reject)
+           `((sprite-future-then ,future
+                                 (sprite-future--warn-callback ,on-resolve)
+                                 (sprite-future--warn-callback ,on-reject))))
+       ,future)))
 
 ;;;; Async/await
 ;;

@@ -483,23 +483,32 @@ and `sprite-communication-fallback' is non-nil."
               ((symbol-function 'sprite--call-and-read)
                (lambda (_n _f) 'the-result))
               ((symbol-function 'sprite--registry-get) (lambda (_) nil)))
-      (should (eq 'the-result (with-sprite "work.0.render" (foo))))
+      (should (eq 'the-result (with-sprite "work.0.render" (foo) :log t)))
       (should (member 'sent logged))
       (should (member 'received logged)))))
 
-(ert-deftest sprite/with-sprite-no-log-returns-nil-on-failure ()
-  "`with-sprite' :no-log returns nil when `sprite--call' returns non-zero."
-  (cl-letf (((symbol-function 'sprite--call) (lambda (&rest _) 1)))
-    (should (null (with-sprite "work.0.render" t :no-log t)))))
+(ert-deftest sprite/with-sprite-logging-is-opt-in ()
+  (let (logged)
+    (cl-letf (((symbol-function 'sprite--log)
+               (lambda (&rest args) (push args logged)))
+              ((symbol-function 'sprite--call-and-read) (lambda (&rest _) 42))
+              ((symbol-function 'sprite--registry-get) (lambda (_) nil)))
+      (should (= 42 (with-sprite "test" (+ 1 2))))
+      (should-not logged))))
 
-(ert-deftest sprite/with-sprite-no-log-reads-result ()
-  "`with-sprite' :no-log reads and returns the emacsclient output."
+(ert-deftest sprite/with-sprite-returns-nil-on-failure ()
+  "`with-sprite' returns nil when `sprite--call' returns non-zero."
+  (cl-letf (((symbol-function 'sprite--call) (lambda (&rest _) 1)))
+    (should (null (with-sprite "work.0.render" t)))))
+
+(ert-deftest sprite/with-sprite-reads-result ()
+  "`with-sprite' reads and returns the emacsclient output."
   (cl-letf (((symbol-function 'sprite--call)
              (cl-function
               (lambda (_name _form &key buffer)
                 (when buffer (with-current-buffer buffer (insert "t")))
                 0))))
-    (should (eq t (with-sprite "work.0.render" t :no-log t)))))
+    (should (eq t (with-sprite "work.0.render" t)))))
 
 ;;;; Overview buffer
 

@@ -334,27 +334,28 @@ fails and `sprite-communication-fallback' is non-nil."
            (sprite--call-and-read-emacsclient name form))))
     (_ (sprite--call-and-read-emacsclient name form))))
 
-(cl-defmacro with-sprite (name form &key no-log)
+(cl-defmacro with-sprite (name form &key log)
   "Evaluate FORM in sprite NAME via emacsclient.
 Returns the read result, or nil if the connection fails.
-Unless NO-LOG is non-nil, logs the exchange and updates last-contact."
+LOG enables logging of the exchange.
+Updates last-contact when a non-nil result is received."
   (declare (indent 1))
   (let ((gname (make-symbol "name"))
-        (gresult (make-symbol "result")))
-    `(let ((,gname ,name))
-       ,(unless no-log `(sprite--log ,gname 'sent (format "%S" ',form)))
+        (gresult (make-symbol "result"))
+        (glog (make-symbol "log")))
+    `(let ((,gname ,name)
+           (,glog ,log))
+       (when ,glog (sprite--log ,gname 'sent (format "%S" ',form)))
        (let ((,gresult
-              (condition-case ,(if no-log '_ 'err)
+              (condition-case err
                   (sprite--call-and-read ,gname ',form)
                 (error
-                 ,(unless no-log
-                    `(sprite--log ,gname 'error (error-message-string err)))
+                 (when ,glog (sprite--log ,gname 'error (error-message-string err)))
                  nil))))
-         ,(unless no-log
-            `(when ,gresult
-               (sprite--log ,gname 'received (format "%S" ,gresult))
-               (when-let* ((s (sprite--registry-get ,gname)))
-                 (setf (sprite-last-contact s) (current-time)))))
+         (when ,gresult
+           (when ,glog (sprite--log ,gname 'received (format "%S" ,gresult)))
+           (when-let* ((s (sprite--registry-get ,gname)))
+             (setf (sprite-last-contact s) (current-time))))
          ,gresult))))
 
 (defun sprite-open-log (name)
@@ -415,7 +416,7 @@ matching PID first; falls back to an emacsclient ping."
                   (pid (sprite-pid s))
                   ((= pid (process-id proc))))
         t)
-      (not (null (with-sprite full-name t :no-log t)))))
+      (not (null (with-sprite full-name t)))))
 
 (cl-defun sprite--wait-for-server (full-name &key timeout-secs)
   "Poll until sprite FULL-NAME's server is accepting connections.
@@ -423,7 +424,7 @@ Times out after TIMEOUT-SECS seconds (default 10).  Returns t on success."
   (let ((deadline (time-add (current-time) (or timeout-secs 10)))
         ready)
     (while (and (not ready) (time-less-p (current-time) deadline))
-      (when (with-sprite full-name t :no-log t)
+      (when (with-sprite full-name t)
         (setq ready t))
       (unless ready
         (sleep-for 0.5)))

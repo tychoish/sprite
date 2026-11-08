@@ -41,7 +41,7 @@
 
 (defun sprite-list--query-buffer-count (full-name)
   "Try to get the buffer count from sprite FULL-NAME.  Returns integer or nil."
-  (when-let* ((n (with-sprite full-name (length (buffer-list)) :no-log t))
+  (when-let* ((n (with-sprite full-name (length (buffer-list))))
               ((numberp n)))
     n))
 
