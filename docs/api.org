@@ -35,65 +35,63 @@ API documentation for the entire =sprite= package, generated from docstrings.
 #+RESULTS:
 ** sprite
 
-**** [[file:../sprite.el::55][server-use-tcp]] :variable:
+*** [[file:../sprite.el::40][server-use-tcp]] :variable:
 :PROPERTIES:
 :CUSTOM_ID: server-use-tcp
 :END:
 
 If non-nil, use TCP sockets instead of local sockets.
 
-**** [[file:../sprite.el::56][server-auth-dir]] :variable:
+*** [[file:../sprite.el::41][server-socket-dir]] :variable:
 :PROPERTIES:
-:CUSTOM_ID: server-auth-dir
+:CUSTOM_ID: server-socket-dir
 :END:
 
-Directory for server authentication files. We only use this if ~server-use-tcp~ is non-nil. Otherwise we use ~server-socket-dir~.
+The directory in which to place the server socket. If local sockets are not supported, this is nil.
 
-NOTE: On FAT32 filesystems, directories are not secure; files can be read and modified by any user or process. It is strongly suggested to set ~server-auth-dir~ to a directory residing in a NTFS partition instead.
-
-**** [[file:../sprite.el::66][sprite-instance-id]] :variable:
+*** [[file:../sprite.el::51][sprite-instance-id]] :variable:
 :PROPERTIES:
 :CUSTOM_ID: sprite-instance-id
 :END:
 
 Name of the running Emacs instance. Set by ‘sprite-set-up-instance-name’ at startup.
 
-**** [[file:../sprite.el::73][sprite-cli-instance-id]] :variable:
+*** [[file:../sprite.el::58][sprite-cli-instance-id]] :variable:
 :PROPERTIES:
 :CUSTOM_ID: sprite-cli-instance-id
 :END:
 
 CLI-specified instance name; set from --id command-line arguments.
 
-**** [[file:../sprite.el::76][sprite-resolve-instance-id]]
+*** [[file:../sprite.el::61][sprite-resolve-instance-id]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-resolve-instance-id
 :END:
 
 Return the current Emacs instance ID. Resolution order: daemon name, ~sprite-cli-instance-id~, ~sprite-instance-id~, then "solo".
 
-**** [[file:../sprite.el::91][sprite-instance-name]]
+*** [[file:../sprite.el::77][sprite-instance-name]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-instance-name
 :END:
 
 Return the current Emacs instance name, initialising it if needed. Caches the result in ~sprite-instance-id~.  This is the preferred public accessor; call ~sprite-resolve-instance-id~ only when the raw resolution chain must be re-evaluated.
 
-**** TODO [[file:../sprite.el::100][sprite-system-name]]
+*** TODO [[file:../sprite.el::86][sprite-system-name]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-system-name
 :END:
 
 *no docstring*
 
-**** [[file:../sprite.el::103][sprite-conf-host-and-instance]]
+*** [[file:../sprite.el::89][sprite-conf-host-and-instance]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-conf-host-and-instance
 :END:
 
 Return (HOSTNAME INSTANCE-ID) for state-path construction.
 
-**** [[file:../sprite.el::110][sprite-state-file-prefix]]
+*** [[file:../sprite.el::96][sprite-state-file-prefix]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-state-file-prefix
 :END:
@@ -102,32 +100,32 @@ Return (HOSTNAME INSTANCE-ID) for state-path construction.
 
 Return the instance-scoped filename prefix for /NAME/. Produces HOSTNAME-INSTANCE-/NAME/[-USERNAME] where USERNAME is included only when running as root or under a symlinked ~user-emacs-directory~.
 
-**** [[file:../sprite.el::126][sprite-state-path]]
+*** [[file:../sprite.el::112][sprite-state-path]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-state-path
 :END:
 
 : (fn NAME)
 
-Return the full state-directory path for /NAME/, scoped to this host and instance.
+Return full state-directory path for /NAME/, scoped to host and instance.
 
-**** [[file:../sprite.el::135][sprite-cli-resolve-id]]
+*** [[file:../sprite.el::121][sprite-cli-resolve-id]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-cli-resolve-id
 :END:
 
 Parse --id=NAME or --id NAME from ~command-line-functions~ context. Sets ~sprite-cli-instance-id~ when found.
 
-**** [[file:../sprite.el::190][sprite-state-directory]]
+*** [[file:../sprite.el::176][sprite-state-directory]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-state-directory
 :END:
 
 : (fn &key FULL-NAME)
 
-Return the state directory for sprite instance /FULL-NAME/, or the sprite root if nil.
+Return state directory for sprite /FULL-NAME/, or sprite root if nil.
 
-**** [[file:../sprite.el::197][sprite-conf-state-path]]
+*** [[file:../sprite.el::183][sprite-conf-state-path]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-conf-state-path
 :END:
@@ -136,213 +134,51 @@ Return the state directory for sprite instance /FULL-NAME/, or the sprite root i
 
 Return path for /NAME/ within /FULL-NAME/’s state directory. If /FULL-NAME/ is nil, returns path under the sprite root.
 
-**** [[file:../sprite.el::355][sprite-define]]
+*** [[file:../sprite.el::190][sprite-startup-operations]] :option:
 :PROPERTIES:
-:CUSTOM_ID: sprite-define
+:CUSTOM_ID: sprite-startup-operations
 :END:
 
-: (fn &key UNIQUE-NAME (PARENT (sprite-instance-name)) (STARTUP 'idle))
+List of operations run in sequence during startup.
 
-Declare that a sprite named /UNIQUE-NAME/ should exist under PARENT. STARTUP controls creation when absent: ‘sync’  — create immediately when ~sprite-defs-activate~ runs. ‘idle’  — create on the next Emacs idle period after activation. Definitions persist across sessions via savehist.  Returns the provisional sprite struct.
-
-**** [[file:../sprite.el::371][sprite-defs-activate]]
+*** [[file:../sprite.el::196][sprite-first-frame-operations]] :option:
 :PROPERTIES:
-:CUSTOM_ID: sprite-defs-activate
+:CUSTOM_ID: sprite-first-frame-operations
 :END:
 
-Reconcile declared definitions with the running instance. For each provisional entry whose :parent matches ~sprite-instance-name~: - If a real sprite with the same (parent, unique-name) is already in the registry, promote it (copy startup, remove provisional entry). - If absent and startup is ‘sync’, create the sprite immediately. - If absent and startup is ‘idle’, schedule via the session idle hook.
+List of operations run after the first frame is created.
 
-**** [[file:../sprite.el::400][sprite-defs-activate-idle-check]]
+*** [[file:../sprite.el::202][sprite-slow-op-reporting]] :option:
 :PROPERTIES:
-:CUSTOM_ID: sprite-defs-activate-idle-check
+:CUSTOM_ID: sprite-slow-op-reporting
 :END:
 
-Idle hook: activate pending definitions; deregister when none remain.
+When non-nil, log timing statistics for startup operations.
 
-**** [[file:../sprite.el::456][with-sprite]]
+*** [[file:../sprite.el::208][sprite-slow-op-threshold]] :option:
 :PROPERTIES:
-:CUSTOM_ID: with-sprite
+:CUSTOM_ID: sprite-slow-op-threshold
 :END:
 
-: (fn NAME FORM &key LOG)
+Threshold in seconds for logging startup operation durations.
 
-Evaluate /FORM/ in sprite /NAME/ and return the result, or nil on failure. Pass /LOG/ to enable dispatch and outcome logging.
-
-**** [[file:../sprite.el::479][sprite-open-log]] :command:
+*** [[file:../sprite.el::214][with-sprite-slow-op-timer]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-open-log
+:CUSTOM_ID: with-sprite-slow-op-timer
 :END:
 
-: (fn NAME)
+: (fn NAME &rest BODY)
 
-Switch to the communication log buffer for sprite /NAME/.
+Execute /BODY/, logging duration for /NAME/ when reporting is enabled. Reporting is enabled when ~sprite-slow-op-reporting~ or ~init-file-debug~ is non-nil, and logged if duration exceeds ~sprite-slow-op-threshold~.
 
-*** Lifecycle
-
-**** [[file:../sprite.el::547][sprite-create]] :command:
+*** [[file:../sprite.el::249][sprite-run-startup-operations]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-create
+:CUSTOM_ID: sprite-run-startup-operations
 :END:
 
-: (fn UNIQUE-NAME &key TIMEOUT)
+: (fn &optional OPERATIONS &rest ARGS)
 
-Spawn a new sprite daemon with /UNIQUE-NAME/ under the current instance. The current instance’s ID becomes the parent. Returns the new sprite struct.
-
-Times out after /TIMEOUT/ seconds.
-
-**** [[file:../sprite.el::594][sprite-stop]] :command:
-:PROPERTIES:
-:CUSTOM_ID: sprite-stop
-:END:
-
-: (fn NAME)
-
-Send (kill-emacs) to sprite /NAME/ via emacsclient.
-
-**** [[file:../sprite.el::598][sprite-restart]] :command:
-:PROPERTIES:
-:CUSTOM_ID: sprite-restart
-:END:
-
-: (fn NAME)
-
-Restart sprite /NAME/: stop it then create a new daemon with the same unique-name.
-
-**** [[file:../sprite.el::611][sprite-decommission]] :command:
-:PROPERTIES:
-:CUSTOM_ID: sprite-decommission
-:END:
-
-: (fn NAME)
-
-Decommission sprite /NAME/: stop it and write the DECOMMISSIONED marker.
-
-**** [[file:../sprite.el::624][sprite-communication-backend]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-communication-backend
-:END:
-
-Transport used for sprite eval calls. ‘emacsclient’ shells out to the emacsclient binary (default, matches current behaviour).  ‘direct’ speaks the server wire protocol over a socket via sprite-direct.el, with no subprocess.
-
-**** [[file:../sprite.el::632][sprite-communication-fallback]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-communication-fallback
-:END:
-
-When non-nil, retry with the other backend after a failed direct call. Only applies when ~sprite-communication-backend~ is ‘direct’: a failed socket connection retries once via emacsclient before giving up.
-
-**** [[file:../sprite.el::676][sprite-open-frame]] :command:
-:PROPERTIES:
-:CUSTOM_ID: sprite-open-frame
-:END:
-
-: (fn SPRITE)
-
-Open a new Emacs frame connected to /SPRITE/. When called interactively, select from accessible sprites via ~annotated-completing-read~ (when available), annotated with status and uptime.
-
-*** Fleet Api
-
-**** [[file:../sprite.el::707][sprite-active-threshold]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-active-threshold
-:END:
-
-Seconds since last-contact after which a sprite is considered available. A sprite is "active" if it was contacted within this many seconds.
-
-**** [[file:../sprite.el::713][sprite-max-count]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-max-count
-:END:
-
-Maximum number of sprite ~sprite-get-or-create-next~ will spawn.
-
-**** [[file:../sprite.el::718][sprite-startup-timeout]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-startup-timeout
-:END:
-
-Seconds to wait for a newly spawned sprite server to accept connections.
-
-**** [[file:../sprite.el::724][sprite-worker-p]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-worker-p
-:END:
-
-Return t if this instance is itself a sprite (has a parent).
-
-**** [[file:../sprite.el::728][sprite-resolve-list]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-resolve-list
-:END:
-
-Return list of sprite structs accessible to this instance. Includes direct children.  If this instance is itself a sprite (worker), also includes sibling sprite from the same parent.
-
-**** [[file:../sprite.el::745][sprite-controller-p]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-controller-p
-:END:
-
-Return t if this instance has at least one non-decommissioned sprite.
-
-**** [[file:../sprite.el::752][sprite-available-p]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-available-p
-:END:
-
-Return t if any accessible sprite are configured.
-
-**** [[file:../sprite.el::772][sprite-get-next]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-get-next
-:END:
-
-Return the struct of the next available sprite, or nil. "Available" means running and not recently contacted.
-
-**** [[file:../sprite.el::778][sprite-get-or-create-next]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-get-or-create-next
-:END:
-
-: (fn &key TIMEOUT)
-
-Return the next available sprite, creating one if none are free. Times out after /TIMEOUT/ seconds.  Signals ~user-error~ if ~sprite-max-count~ would be exceeded.
-
-**** [[file:../sprite.el::790][sprite-get-or-create-fleet]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-get-or-create-fleet
-:END:
-
-: (fn COUNT &key TIMEOUT)
-
-Return a list of up to /COUNT/ available or newly created sprite structs. Reuses available sprites first, spawning new ones up to ~sprite-max-count~ or /COUNT/.
-
-**** [[file:../sprite.el::819][sprite-mode-map-prefix]] :option:
-:PROPERTIES:
-:CUSTOM_ID: sprite-mode-map-prefix
-:END:
-
-Cons storing ~sprite-mode-command-map~ is bound as a nested prefix keymap.
-
-Applied when ~sprite-mode~ is enabled and removed when it is disabled.  Set to nil to skip binding it into any parent keymap.
-
-**** [[file:../sprite.el::881][sprite-mode]] :command:
-:PROPERTIES:
-:CUSTOM_ID: sprite-mode
-:END:
-
-: (fn &optional ARG)
-
-Global minor mode for managing sprite (subordinate Emacs daemon) state.
-
-Enabling wires the registry into ‘savehist’ persistence and scans the filesystem for already-running sprites to populate the registry; disabling removes the ‘savehist’ hooks and variable registration. See ~sprite-mode-map~ and ~sprite-mode-command-map~.
-
-This is a global minor mode.  If called interactively, toggle the ‘Sprite mode’ mode.  If the prefix argument is positive, enable the mode, and if it is zero or negative, disable the mode.
-
-If called from Lisp, toggle the mode if /ARG/ is ‘toggle’.  Enable the mode if /ARG/ is nil, omitted, or is a positive number.  Disable the mode if /ARG/ is a negative number.
-
-To check whether the minor mode is enabled in the current buffer, evaluate ‘(default-value 'sprite-mode)’.
-
-The mode’s hook is called both when the mode is enabled and when it is disabled.
+Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ defaults to ~sprite-startup-operations~. Supported /ARGS/ keyword arguments: :delay SECONDS (defaults to 0.1) :on-done FUNCTION :frame FRAME Return a cancellation function.
 
 ** sprite-direct
 
@@ -773,7 +609,7 @@ Inside a ~sprite-future-async-defun~ body, suspend until /FUTURE/ settles. Resum
 
 ** sprite-heartbeat
 
-*** [[file:../sprite-heartbeat.el::31][sprite-heartbeat-defhandler]]
+*** [[file:../sprite-heartbeat.el::32][sprite-heartbeat-defhandler]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-heartbeat-defhandler
 :END:
@@ -782,14 +618,14 @@ Define a function NAME callable by sprites. ARGS must begin with a symbol that r
 
 Example: (sprite-heartbeat-defhandler handle-status (caller status) (message "%s reported: %s" caller status))
 
-*** [[file:../sprite-heartbeat.el::48][sprite-heartbeat-parent-socket-name]]
+*** [[file:../sprite-heartbeat.el::49][sprite-heartbeat-parent-socket-name]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-heartbeat-parent-socket-name
 :END:
 
 Return the socket name of this sprite’s parent instance. Derived from the leading component of ~sprite-instance-name~. Falls back to the instance name itself when called on the root instance.
 
-*** [[file:../sprite-heartbeat.el::56][sprite-heartbeat-send]]
+*** [[file:../sprite-heartbeat.el::57][sprite-heartbeat-send]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-heartbeat-send
 :END:
@@ -798,14 +634,14 @@ Evaluate FORM in the parent instance, tagging this sprite as the sender. The par
 
 ** sprite-list
 
-*** [[file:../sprite-list.el::98][sprite-list-mode-map]] :variable:
+*** [[file:../sprite-list.el::99][sprite-list-mode-map]] :variable:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-mode-map
 :END:
 
 Keymap for ~sprite-list-mode~.
 
-*** [[file:../sprite-list.el::115][sprite-list-mode]] :command:
+*** [[file:../sprite-list.el::116][sprite-list-mode]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-mode
 :END:
@@ -820,84 +656,84 @@ C-M-i		backward-button
 
 In addition to any hooks its parent mode ~tabulated-list-mode~ might have run, this mode runs the hook ~sprite-list-mode-hook~, as the final or penultimate step during initialization.
 
-*** [[file:../sprite-list.el::131][sprite-list-refresh]] :command:
+*** [[file:../sprite-list.el::132][sprite-list-refresh]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-refresh
 :END:
 
 Refresh the sprite overview buffer.
 
-*** [[file:../sprite-list.el::146][sprite-list-info-map]] :variable:
+*** [[file:../sprite-list.el::147][sprite-list-info-map]] :variable:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-info-map
 :END:
 
 Keymap for sprite info help buffers. Add context-specific bindings here.
 
-*** [[file:../sprite-list.el::153][sprite-list-info]] :command:
+*** [[file:../sprite-list.el::161][sprite-list-info]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-info
 :END:
 
 Show a help-window detail buffer for the sprite at point.
 
-*** [[file:../sprite-list.el::183][sprite-list]] :command:
+*** [[file:../sprite-list.el::191][sprite-list]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list
 :END:
 
 Open the sprite overview buffer.
 
-*** [[file:../sprite-list.el::222][sprite-list-create]] :command:
+*** [[file:../sprite-list.el::230][sprite-list-create]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-create
 :END:
 
 Create a new sprite from the overview buffer.
 
-*** [[file:../sprite-list.el::228][sprite-list-decommission]] :command:
+*** [[file:../sprite-list.el::236][sprite-list-decommission]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-decommission
 :END:
 
 Decommission the sprite at point.
 
-*** [[file:../sprite-list.el::236][sprite-list-restart]] :command:
+*** [[file:../sprite-list.el::244][sprite-list-restart]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-restart
 :END:
 
 Restart the sprite at point.
 
-*** [[file:../sprite-list.el::242][sprite-list-stop]] :command:
+*** [[file:../sprite-list.el::250][sprite-list-stop]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-stop
 :END:
 
 Stop the sprite at point.
 
-*** [[file:../sprite-list.el::248][sprite-list-open-log]] :command:
+*** [[file:../sprite-list.el::256][sprite-list-open-log]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-open-log
 :END:
 
 Open the communication log for the sprite at point.
 
-*** [[file:../sprite-list.el::253][sprite-list-check]] :command:
+*** [[file:../sprite-list.el::261][sprite-list-check]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-check
 :END:
 
 Verify whether the sprite at point is reachable via emacsclient. Updates the sprite’s running status and refreshes the list.
 
-*** [[file:../sprite-list.el::264][sprite-list-open-frame]] :command:
+*** [[file:../sprite-list.el::272][sprite-list-open-frame]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-open-frame
 :END:
 
 Open a new Emacs frame connected to the sprite at point.
 
-*** [[file:../sprite-list.el::270][sprite-list-menu]] :command:
+*** [[file:../sprite-list.el::278][sprite-list-menu]] :command:
 :PROPERTIES:
 :CUSTOM_ID: sprite-list-menu
 :END:
@@ -946,14 +782,18 @@ Start or stop the idle timer to match ~sprite-system-idle-hook~ membership. Star
 :CUSTOM_ID: sprite-system-add-on-idle
 :END:
 
-Add FN to ~sprite-system-idle-hook~ and start the timer if needed. Logs the registration and delegates to ~sprite-system-sync-idle-timer~.
+: (fn FN)
+
+Add /FN/ to ~sprite-system-idle-hook~ and start the timer if needed. Logs the registration and delegates to ~sprite-system-sync-idle-timer~.
 
 *** [[file:../sprite-system.el::76][sprite-system-remove-on-idle]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-system-remove-on-idle
 :END:
 
-Remove FN from ~sprite-system-idle-hook~ and stop the timer if the hook is empty. Logs the deregistration and delegates to ~sprite-system-sync-idle-timer~.
+: (fn FN)
+
+Remove /FN/ from ~sprite-system-idle-hook~ and maybe stop timer. Logs deregistration and delegates to ~sprite-system-sync-idle-timer~.
 
 *** [[file:../sprite-system.el::88][sprite-system-before-sleep-hook]] :variable:
 :PROPERTIES:
@@ -969,19 +809,16 @@ Hook run before the system suspends or hibernates. Each function is called with 
 
 Hook run when the system resumes from suspend or hibernate. Each function is called with no arguments.  Only fires on Linux systems with DBus support and systemd-logind.
 
-*** [[file:../sprite-system.el::116][sprite-system-start-logind-watch]]
+*** [[file:../sprite-system.el::117][sprite-system-start-logind-watch]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-system-start-logind-watch
 :END:
 
 Register DBus signals to run sleep/wake/lock/screensaver hooks. Cancels any existing registrations first to prevent duplicates.
 
-*** [[file:../sprite-system.el::164][sprite-system-stop-logind-watch]]
+*** [[file:../sprite-system.el::165][sprite-system-stop-logind-watch]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-system-stop-logind-watch
 :END:
 
 Unregister the logind PrepareForSleep DBus signal and other signals.
-
-
-
