@@ -164,9 +164,9 @@ Idle hook: activate pending definitions; deregister when none remain.
 :CUSTOM_ID: with-sprite
 :END:
 
-: (fn NAME FORM &key NO-LOG)
+: (fn NAME FORM &key LOG)
 
-Evaluate /FORM/ in sprite /NAME/ via emacsclient. Returns the read result, or nil if the connection fails. Unless /NO-LOG/ is non-nil, logs the exchange and updates last-contact.
+Evaluate /FORM/ in sprite /NAME/ and return the result, or nil on failure. Pass /LOG/ to enable dispatch and outcome logging.
 
 **** [[file:../sprite.el::479][sprite-open-log]] :command:
 :PROPERTIES:
@@ -533,7 +533,123 @@ Read the TCP server file at /PATH/; return its HOST:PORT:KEY string. Returns nil
 
 ** sprite-fleet
 
-*** [[file:../sprite-fleet.el::46][sprite-fleet-mapcar-sprites]]
+*** Predicates
+
+**** [[file:../sprite-fleet.el::82][sprite-fleet-running-p]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-running-p
+:END:
+
+Return non-nil if HANDLE is actively running.
+
+**** [[file:../sprite-fleet.el::86][sprite-fleet-paused-p]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-paused-p
+:END:
+
+Return non-nil if HANDLE is paused.
+
+**** [[file:../sprite-fleet.el::90][sprite-fleet-canceled-p]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-canceled-p
+:END:
+
+Return non-nil if HANDLE was canceled.
+
+**** [[file:../sprite-fleet.el::94][sprite-fleet-completed-p]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-completed-p
+:END:
+
+Return non-nil if HANDLE finished execution.
+
+**** [[file:../sprite-fleet.el::98][sprite-fleet-progress]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-progress
+:END:
+
+Return (COMPLETED . TOTAL) for HANDLE. TOTAL may be nil if input sequence was a lazy iterator of unknown size.
+
+**** [[file:../sprite-fleet.el::104][sprite-future-fleet-handle]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-future-fleet-handle
+:END:
+
+Return the ‘sprite-fleet-handle’ associated with FUTURE, if any.
+
+*** Helper Utilities
+
+**** [[file:../sprite-fleet.el::322][sprite-fleet-cancel]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-cancel
+:END:
+
+Cancel in-flight fleet execution for TARGET (handle or future). Aborts scheduled timers, severs client sockets / kills processes for all active worker futures, and settles the overall future as rejected with (cons :canceled (or REASON :user-cancel)).
+
+**** [[file:../sprite-fleet.el::347][sprite-fleet-pause]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-pause
+:END:
+
+Pause dispatching new items for HANDLE. In-flight worker futures continue to run and collect results, but freed targets will not be dispatched to until resumed.
+
+**** [[file:../sprite-fleet.el::358][sprite-fleet-resume]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-resume
+:END:
+
+Resume dispatching items for paused HANDLE.
+
+**** [[file:../sprite-fleet.el::365][sprite-fleet-wait]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-wait
+:END:
+
+Block until TARGET (handle or future) settles; return results or nil. TIMEOUT overrides ~sprite-direct-blocking-timeout~.
+
+**** [[file:../sprite-fleet.el::376][sprite-fleet-pool]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-pool
+:END:
+
+: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES (DELAY 0.0) (ORDER 'preserve) (ERROR-POLICY :collect-nil) ON-ITEM ON-DONE)
+
+Create and start a ‘sprite-fleet-handle’ executing /FN-OR-FORM/ over /ITEMS/. /FLEET-SIZE/ is the maximum number of concurrent sprites. /SPRITES/ is a list of sprite structs or target name strings. DELAY is the yielding delay in seconds between dispatches (default 0.0). ORDER specifies result ordering: ‘preserve’ (default), ‘fifo’, ‘lifo’, or ‘unordered’. ERROR-POLICY specifies failure behavior: ~:collect-nil~ (default), ~:collect-error~, or ~:abort~. /ON-ITEM/ is an optional callback (lambda (item result idx)). /ON-DONE/ is an optional callback (lambda (results)).
+
+Returns a ‘sprite-fleet-handle’.
+
+**** [[file:../sprite-fleet.el::444][sprite-fleet-map]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-map
+:END:
+
+: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES (DELAY 0.0) (ORDER 'preserve) (ERROR-POLICY :collect-nil) ON-ITEM ON-DONE WAIT TIMEOUT (ASYNC t))
+
+Evaluate /FN-OR-FORM/ over /ITEMS/ across a fleet of sprites. By default returns a ‘sprite-future’ that resolves to the ordered results. The future’s controller is accessible via ~sprite-future-fleet-handle~.
+
+If /WAIT/ is non-nil (or ASYNC is nil), blocks until complete and returns the results.
+
+**** [[file:../sprite-fleet.el::469][sprite-fleet-each]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-each
+:END:
+
+: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES (DELAY 0.0) (ERROR-POLICY :collect-nil) ON-ITEM ON-DONE)
+
+Stream evaluation of /FN-OR-FORM/ over /ITEMS/ across a fleet of sprites. Returns the controller ‘sprite-fleet-handle’ immediately for flow control (~sprite-fleet-pause~, ~sprite-fleet-resume~, ~sprite-fleet-cancel~). Results are streamed to /ON-ITEM/ as each worker completes.
+
+**** [[file:../sprite-fleet.el::488][sprite-fleet-mapcar]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-fleet-mapcar
+:END:
+
+: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES TIMEOUT ASYNC (DELAY 0.0) (ORDER 'preserve) (ERROR-POLICY :collect-nil) ON-ITEM ON-DONE)
+
+Evaluate /FN-OR-FORM/ for each item in /ITEMS/ using a fleet of sprites. Mirrors ~mapcar~ across the daemon fleet.
+
+Preserves backward compatibility: defaults to synchronous execution blocking until all results settle unless /ASYNC/ is non-nil. Delegates to ~sprite-fleet-pool~ and the yielding stepper engine.
+
+**** [[file:../sprite-fleet.el::514][sprite-fleet-mapcar-sprites]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-fleet-mapcar-sprites
 :END:
@@ -542,31 +658,14 @@ Read the TCP server file at /PATH/; return its HOST:PORT:KEY string. Returns nil
 
 Evaluate /FORM/ in each of /SPRITES/ concurrently; return results in order. Mirrors ~mapcar~: one result per input, order preserved.  A sprite that times out or rejects contributes nil at its position.  /SPRITES/ is a list of ‘sprite’ structs, e.g. from ~sprite-resolve-list~.
 
-*** [[file:../sprite-fleet.el::55][sprite-fleet-mapc]]
+**** [[file:../sprite-fleet.el::523][sprite-fleet-mapc]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-fleet-mapc
 :END:
 
 Evaluate FORM in each of SPRITES concurrently; discard results. Mirrors ~mapc~: dispatches to every sprite and returns SPRITES immediately without waiting for any of them to settle.  SPRITES is a list of ‘sprite’ structs, e.g. from ~sprite-resolve-list~.
 
-*** [[file:../sprite-fleet.el::64][sprite-fleet-mapcar]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-fleet-mapcar
-:END:
-
-: (fn FN-OR-FORM ITEMS &key FLEET-SIZE SPRITES TIMEOUT ASYNC)
-
-Evaluate /FN-OR-FORM/ for each item in /ITEMS/ using a fleet of sprites. /FN-OR-FORM/ can be a unary function/lambda symbol or a form to evaluate. When /FN-OR-FORM/ is a function symbol or lambda, each item is passed as an arg. When /FN-OR-FORM/ is a form containing ‘item’ or ‘_’, that form is evaluated remotely with the item bound.
-
-/FLEET-SIZE/ is the maximum number of concurrent sprites to use (defaults to ~sprite-max-count~ or the length of /ITEMS/).
-
-/SPRITES/ is an optional list of sprite structs or target name strings to use as the worker fleet.  When omitted, sprites are obtained via ~sprite-get-or-create-fleet~.
-
-/TIMEOUT/ is passed to ~sprite-future-wait~ when operating synchronously.
-
-If /ASYNC/ is non-nil, returns a ‘sprite-future’ immediately that resolves to the ordered list of results when all items complete.  Otherwise, blocks and returns the ordered list of results.
-
-*** [[file:../sprite-fleet.el::123][sprite-fleet-let]]
+**** [[file:../sprite-fleet.el::531][sprite-fleet-let]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-fleet-let
 :END:
@@ -577,7 +676,7 @@ Like ~let~, but each binding’s value comes from a concurrent sprite eval. Each
 
 ** sprite-future
 
-*** [[file:../sprite-future.el::58][sprite-future-pending-p]]
+*** [[file:../sprite-future.el::62][sprite-future-pending-p]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-pending-p
 :END:
@@ -586,7 +685,7 @@ Like ~let~, but each binding’s value comes from a concurrent sprite eval. Each
 
 Return t when /FUTURE/ has not yet resolved or been rejected.
 
-*** [[file:../sprite-future.el::62][sprite-future-resolved-p]]
+*** [[file:../sprite-future.el::66][sprite-future-resolved-p]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-resolved-p
 :END:
@@ -595,7 +694,7 @@ Return t when /FUTURE/ has not yet resolved or been rejected.
 
 Return t when /FUTURE/ resolved successfully.
 
-*** [[file:../sprite-future.el::66][sprite-future-rejected-p]]
+*** [[file:../sprite-future.el::70][sprite-future-rejected-p]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-rejected-p
 :END:
@@ -604,7 +703,7 @@ Return t when /FUTURE/ resolved successfully.
 
 Return t when /FUTURE/ failed. For the ‘direct’ backend this delegates to ~sprite-direct-promise-rejected-p~ via the promise sentinel; for ‘emacsclient’ it reflects a non-zero exit code from the ‘emacsclient’ process.
 
-*** [[file:../sprite-future.el::105][sprite-future-then]]
+*** [[file:../sprite-future.el::116][sprite-future-then]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-then
 :END:
@@ -613,7 +712,7 @@ Return t when /FUTURE/ failed. For the ‘direct’ backend this delegates to ~s
 
 Chain /ON-RESOLVE/ (and optionally /ON-REJECT/) onto /FUTURE/. Returns a new ‘sprite-future’ that settles once /FUTURE/ does: /ON-RESOLVE/ runs (and its return value resolves the new future) if /FUTURE/ resolves; /ON-REJECT/ runs if /FUTURE/ rejects.  Whichever callback is omitted passes /FUTURE/’s own state/value through unchanged.  If /FUTURE/ has already settled, the callback runs immediately and the new future settles synchronously; otherwise it runs later, when /FUTURE/ settles.
 
-*** [[file:../sprite-future.el::137][sprite-future-wait]]
+*** [[file:../sprite-future.el::148][sprite-future-wait]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-wait
 :END:
@@ -622,7 +721,16 @@ Chain /ON-RESOLVE/ (and optionally /ON-REJECT/) onto /FUTURE/. Returns a new ‘
 
 Block until /FUTURE/ settles; return its value or nil on timeout/rejection. Drives process output while waiting, mirroring ~sprite-direct-promise-wait~. /TIMEOUT/ overrides ~sprite-direct-blocking-timeout~; nil waits indefinitely.
 
-*** [[file:../sprite-future.el::202][sprite-future-eval]]
+*** [[file:../sprite-future.el::161][sprite-future-cancel]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-future-cancel
+:END:
+
+: (fn FUTURE &optional REASON)
+
+Cancel /FUTURE/ if pending, severing its underlying process/socket. Transitions /FUTURE/ to :rejected with (cons :canceled (or reason :user-cancel)). Returns t if cancelled, nil if already settled.
+
+*** [[file:../sprite-future.el::227][sprite-future-eval]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-eval
 :END:
@@ -631,23 +739,30 @@ Block until /FUTURE/ settles; return its value or nil on timeout/rejection. Driv
 
 Evaluate /FORM/ in sprite /TARGET/ asynchronously; return a ‘sprite-future’. Dispatches on ~sprite-communication-backend~, the same way ~sprite--call-and-read~ does for the synchronous API.
 
-*** TODO [[file:../sprite-future.el::222][sprite-future-rejected]]
+*** TODO [[file:../sprite-future.el::257][with-sprite-async]]
+:PROPERTIES:
+:CUSTOM_ID: with-sprite-async
+:END:
+
+*no docstring*
+
+*** TODO [[file:../sprite-future.el::281][sprite-future-rejected]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-rejected
 :END:
 
 *no docstring*
 
-*** [[file:../sprite-future.el::229][sprite-future-async-defun]]
+*** [[file:../sprite-future.el::288][sprite-future-async-defun]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-async-defun
 :END:
 
 : (fn NAME ARGLIST &rest BODY)
 
-Define /NAME/ as an async sprite workflow. Inside /BODY/, ~sprite-future-await~ suspends the generator until a future settles, without blocking the parent Emacs event loop.  Calling /NAME/ returns immediately with a ‘sprite-future’ for the workflow’s overall result.
+Define /NAME/ as an async sprite workflow. Inside /BODY/, ~sprite-future-await~ suspends until a future settles, without blocking the parent Emacs event loop.  Calling /NAME/ returns immediately with a ‘sprite-future’ for the workflow’s overall result.
 
-*** [[file:../sprite-future.el::242][sprite-future-await]]
+*** [[file:../sprite-future.el::301][sprite-future-await]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-future-await
 :END:
