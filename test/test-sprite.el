@@ -1125,6 +1125,53 @@ and `sprite-communication-fallback' is non-nil."
     (sprite-run-startup-operations)
     (should (equal order '(op)))))
 
+(ert-deftest sprite/run-generic-batch-sync ()
+  "sprite-run executes operations with arglist in batch mode."
+  (let ((results nil)
+        (done nil)
+        (noninteractive t))
+    (sprite-run
+     (list (lambda () (push 'zero results))
+           (lambda (x y) (push (+ x y) results)))
+     :arglist '(10 20)
+     :on-done (lambda () (setq done t)))
+    (should (equal (reverse results) '(zero 30)))
+    (should (eq done t))))
+
+(defvar sprite-test--fake-hook nil)
+
+(ert-deftest sprite/run-generic-hook-symbol ()
+  "sprite-run can take a symbol whose value is a list of functions."
+  (let* ((order nil)
+         (noninteractive t)
+         (sprite-test--fake-hook (list (lambda (arg) (push (cons 1 arg) order))
+                                       (lambda (arg) (push (cons 2 arg) order)))))
+    (sprite-run 'sprite-test--fake-hook :arglist 'active)
+    (should (equal (reverse order) '((1 . active) (2 . active))))))
+
+(ert-deftest sprite/run-generic-initial-delay-and-cancellation ()
+  "sprite-run schedules with initial-delay and cancellation stops execution."
+  (let ((noninteractive nil)
+        (executed nil)
+        (timers nil))
+    (cl-letf (((symbol-function 'run-with-idle-timer)
+               (lambda (secs repeat fn &rest args)
+                 (let ((rec (list secs fn)))
+                   (push rec timers)
+                   rec)))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (setq timers (delete timer timers)))))
+      ;; Test :run-after / :initial-delay
+      (let ((cancel-fn (sprite-run (list (lambda () (setq executed t)))
+                                   :run-after 2.5
+                                   :delay 0.5)))
+        ;; Timer was registered with 2.5
+        (should (= (caar timers) 2.5))
+        ;; Calling cancellation function cancels timer
+        (funcall cancel-fn)
+        (should (null timers))))))
+
 (ert-deftest sprite/execute-startup-operation-timing-logged ()
   "Log operation duration when `sprite-slow-op-reporting' is enabled."
   (let ((logged nil)

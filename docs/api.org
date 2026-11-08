@@ -171,14 +171,23 @@ Threshold in seconds for logging startup operation durations.
 
 Execute /BODY/, logging duration for /NAME/ when reporting is enabled. Reporting is enabled when ~sprite-slow-op-reporting~ or ~init-file-debug~ is non-nil, and logged if duration exceeds ~sprite-slow-op-threshold~.
 
-*** [[file:../sprite.el::249][sprite-run-startup-operations]]
+*** [[file:../sprite.el::255][sprite-run]]
+:PROPERTIES:
+:CUSTOM_ID: sprite-run
+:END:
+
+: (fn &optional OPERATIONS &rest ARGS)
+
+Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ may be a list of functions, a single function, or a symbol whose value is a list of functions (such as a hook). Supported /ARGS/ keyword arguments: :run-after or :initial-delay SECONDS (defaults to :delay) :delay SECONDS (defaults to 0.1) :arglist LIST or ATOM (arguments passed to non-nilary operations) :on-done FUNCTION :frame FRAME :log-tag STRING (defaults to "[run]"). In noninteractive (batch) sessions, runs all operations synchronously. Return a cancellation function.
+
+*** [[file:../sprite.el::317][sprite-run-startup-operations]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-run-startup-operations
 :END:
 
 : (fn &optional OPERATIONS &rest ARGS)
 
-Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ defaults to ~sprite-startup-operations~. Supported /ARGS/ keyword arguments: :delay SECONDS (defaults to 0.1) :on-done FUNCTION :frame FRAME Return a cancellation function.
+Run /OPERATIONS/ in order, yielding between each in interactive sessions. /OPERATIONS/ defaults to ~sprite-startup-operations~. Supported /ARGS/ keyword arguments: :delay SECONDS (defaults to 0.1) :run-after or :initial-delay SECONDS :on-done FUNCTION :frame FRAME Return a cancellation function. Special case of ~sprite-run~ with default arglist ~'(1)~ and log tag ~"[startup]"~.
 
 ** sprite-direct
 
