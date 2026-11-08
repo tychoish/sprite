@@ -182,9 +182,9 @@ Execute /BODY/, logging duration for /NAME/ when reporting is enabled. Reporting
 
 Run /OPERATIONS/ (or /OPS/) in order, yielding between each in interactive sessions. /OPERATIONS/ may be a list of functions, a single function, or a symbol whose value is a list of functions (such as a hook). Supported keyword arguments: :operations or :ops, :run-after or :initial-delay SECONDS (defaults to :delay), :delay SECONDS (defaults to 0.1), :args or :arglist LIST or ATOM (arguments passed to non-nilary operations), :on-done FUNCTION, :frame FRAME, :buffer BUFFER (`temp' executes in `with-temp-buffer', a buffer object or string name executes in `with-current-buffer'), :log-prefix STRING (defaults to "[run]"). In noninteractive (batch) sessions, runs all operations synchronously. Return a cancellation function.
 
-*** [[file:../sprite-batch.el::117][sprite-run-startup-operations]]
+*** [[file:../sprite-batch.el::117][sprite-batch-startup]]
 :PROPERTIES:
-:CUSTOM_ID: sprite-run-startup-operations
+:CUSTOM_ID: sprite-batch-startup
 :END:
 
 : (fn &optional OPERATIONS &rest ARGS)

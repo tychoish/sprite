@@ -126,8 +126,8 @@
     (should (equal r1 '(1)))
     (should (equal r2 '(2)))))
 
-(ert-deftest sprite-batch/run-startup-operations-forwarding ()
-  "sprite-run-startup-operations forwards kwargs to sprite-run-batch."
+(ert-deftest sprite-batch/startup-forwarding ()
+  "sprite-batch-startup forwards kwargs to sprite-run-batch."
   (let ((sprite-startup-operations (list (lambda () t)))
         (noninteractive nil)
         (timers nil))
@@ -139,7 +139,7 @@
               ((symbol-function 'cancel-timer)
                (lambda (timer)
                  (setq timers (delete timer timers)))))
-      (let ((cancel-fn (sprite-run-startup-operations :run-after 4.0 :delay 0.3)))
+      (let ((cancel-fn (sprite-batch-startup :run-after 4.0 :delay 0.3)))
         (should (= (caar timers) 4.0))
         (funcall cancel-fn)
         (should (null timers))))))

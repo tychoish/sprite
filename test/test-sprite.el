@@ -1117,8 +1117,16 @@ and `sprite-communication-fallback' is non-nil."
     (should (equal (reverse order) '(1 2)))
     (should (eq done t))))
 
-(ert-deftest sprite/run-startup-operations-defaults-to-custom ()
+(ert-deftest sprite/batch-startup-defaults-to-custom ()
   "Default to `sprite-startup-operations' when no list is passed."
+  (let* ((order nil)
+         (noninteractive t)
+         (sprite-startup-operations (list (lambda () (push 'op order)))))
+    (sprite-batch-startup)
+    (should (equal order '(op)))))
+
+(ert-deftest sprite/run-startup-operations-defaults-to-custom ()
+  "Default to `sprite-startup-operations' when no list is passed via alias."
   (let* ((order nil)
          (noninteractive t)
          (sprite-startup-operations (list (lambda () (push 'op order)))))

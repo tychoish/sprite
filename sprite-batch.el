@@ -114,7 +114,7 @@ Return a cancellation function."
 (defalias 'sprite-run #'sprite-run-batch)
 
 ;;;###autoload
-(defun sprite-run-startup-operations (&optional operations &rest args)
+(defun sprite-batch-startup (&optional operations &rest args)
   "Run startup OPERATIONS yielding between each in interactive sessions.
 OPERATIONS defaults to `sprite-startup-operations'.
 Supported ARGS keyword arguments include :delay, :run-after, :on-done, :frame,
@@ -128,6 +128,9 @@ prefix \"[startup]\"."
     (apply #'sprite-run-batch (append kwargs (list :operations sprite-startup-operations
                                                    :args '(1)
                                                    :log-prefix "[startup]")))))
+
+;;;###autoload
+(defalias 'sprite-run-startup-operations #'sprite-batch-startup)
 
 (provide 'sprite-batch)
 ;;; sprite-batch.el ends here
