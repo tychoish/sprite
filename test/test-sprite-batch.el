@@ -263,25 +263,45 @@
         (should (= (length cancelled) 2))
         (should (null (sprite-batch-active-handles)))))))
 
-(ert-deftest sprite-batch/cancel-or-quit-passthrough ()
-  "sprite-batch-cancel-or-quit calls keyboard-quit when no batches are running or in region/minibuffer."
-  (let ((quit-called 0))
-    (cl-letf (((symbol-function 'keyboard-quit)
-               (lambda () (cl-incf quit-called))))
-      ;; 1. No active batches -> immediate keyboard-quit
-      (let ((sprite-batch--active-handles nil))
+(ert-deftest sprite-batch/cancel-or-quit-behavior ()
+  "Menu only when batches run and nothing forces a plain quit."
+  (let ((quit 0) (menu 0)
+        (running (list (sprite-batch-handle--make :id 99 :state 'running))))
+    (cl-letf (((symbol-function 'keyboard-quit) (lambda () (cl-incf quit)))
+              ((symbol-function 'sprite-batch-cancel-menu) (lambda (&optional _) (cl-incf menu))))
+      (let ((sprite-batch--active-handles nil))       ; none -> quit
         (sprite-batch-cancel-or-quit)
-        (should (= quit-called 1)))
-      ;; 2. Active batch, but use-region-p is true -> keyboard-quit
-      (let ((sprite-batch--active-handles (list (sprite-batch-handle--make :id 99 :state 'running))))
+        (should (equal (list quit menu) '(1 0))))
+      (let ((sprite-batch--active-handles running))   ; active -> menu
+        (sprite-batch-cancel-or-quit)
+        (should (equal (list quit menu) '(1 1)))
+        (sprite-batch-cancel-or-quit '(4))            ; C-u -> quit
+        (should (equal (list quit menu) '(2 1)))
         (cl-letf (((symbol-function 'use-region-p) (lambda () t)))
           (sprite-batch-cancel-or-quit)
-          (should (= quit-called 2))))
-      ;; 3. Active batch, but inside minibuffer -> keyboard-quit
-      (let ((sprite-batch--active-handles (list (sprite-batch-handle--make :id 99 :state 'running))))
+          (should (equal (list quit menu) '(3 1))))
         (cl-letf (((symbol-function 'minibufferp) (lambda () t)))
           (sprite-batch-cancel-or-quit)
-          (should (= quit-called 3)))))))
+          (should (equal (list quit menu) '(4 1))))))))
+
+(ert-deftest sprite-batch/menu-do-nothing ()
+  "Choosing \"Do nothing\" neither quits nor cancels."
+  (sprite-batch-test--with-fake-timers
+    (sprite-run-batch :operations (list #'ignore) :name "a")
+    (let ((quit nil))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "Do nothing"))
+                ((symbol-function 'keyboard-quit) (lambda () (setq quit t))))
+        (sprite-batch-cancel-menu t)
+        (should-not quit)
+        (should (= (length sprite-batch--active-handles) 1))))
+    ;; "Do nothing" is offered even with a single batch.
+    (let (table)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p tbl &rest _) (setq table tbl) "Do nothing")))
+        (sprite-batch-cancel-menu t)
+        (should (member "Do nothing" table))
+        (should (member "Quit current operation" table))
+        (should-not (member "Cancel ALL active batches" table))))))
 
 (ert-deftest sprite-batch/cancel-menu-selection ()
   "sprite-batch-cancel-menu displays candidates and dispatches choice."
@@ -293,9 +313,9 @@
     ;; 1. User picks Quit -> keyboard-quit called
     (let ((quit-called nil))
       (cl-letf (((symbol-function 'completing-read)
-                 (lambda (prompt table &rest _) "Quit / Cancel normal operation"))
+                 (lambda (prompt table &rest _) "Quit current operation"))
                 ((symbol-function 'annotated-completing-read)
-                 (lambda (table &rest _) "Quit / Cancel normal operation"))
+                 (lambda (table &rest _) "Quit current operation"))
                 ((symbol-function 'keyboard-quit)
                  (lambda () (setq quit-called t))))
         (sprite-batch-cancel-menu)
@@ -307,19 +327,6 @@
                (lambda (table &rest _) "#1: job-one")))
       (sprite-batch-cancel-menu)
       (should (eq cancelled t)))))
-
-(ert-deftest sprite-batch/mode-toggle-keymap ()
-  "sprite-batch-mode toggles remapping of keyboard-quit."
-  (unwind-protect
-      (progn
-        (sprite-batch-mode 1)
-        (should (eq sprite-batch-intercept-keyboard-quit t))
-        (should (eq (lookup-key global-map [remap keyboard-quit])
-                    #'sprite-batch-cancel-or-quit))
-        (sprite-batch-mode -1)
-        (should (eq sprite-batch-intercept-keyboard-quit nil))
-        (should (null (lookup-key global-map [remap keyboard-quit]))))
-    (sprite-batch-mode -1)))
 
 ;; --- review follow-up tests ---
 (defvar sprite-batch-test--timers nil)
@@ -434,18 +441,57 @@
                  (lambda (&rest _) (sprite-batch-cancel :all) cand)))
         (sprite-batch-cancel-menu)))))
 
-(ert-deftest sprite-batch/intercept-variable-syncs-mode ()
-  "Setting the defcustom via `customize-set-variable' toggles the mode."
+(ert-deftest sprite-batch/mode-keymaps-and-opt-in ()
+  "Modes are opt-in, buffer-local, and never touch the global keymap."
+  (should-not (command-remapping 'keyboard-quit))
+  (with-temp-buffer
+    (sprite-batch-mode 1)
+    (should (eq (lookup-key sprite-batch-mode-map [remap keyboard-quit])
+                #'sprite-batch-cancel-or-quit))
+    (should (eq (lookup-key sprite-batch-mode-map (kbd "C-x C-g"))
+                #'sprite-batch-cancel))
+    (should (eq (command-remapping 'keyboard-quit) #'sprite-batch-cancel-or-quit))
+    (sprite-batch-mode -1)
+    (should-not (command-remapping 'keyboard-quit)))
+  (should-not (command-remapping 'keyboard-quit)))
+
+(ert-deftest sprite-batch/global-mode-enables-in-buffers ()
+  "`global-sprite-batch-mode' enables the local mode in new buffers."
   (unwind-protect
       (progn
-        (customize-set-variable 'sprite-batch-intercept-keyboard-quit t)
-        (should sprite-batch-mode)
-        (should (eq (lookup-key global-map [remap keyboard-quit])
-                    #'sprite-batch-cancel-or-quit))
-        (customize-set-variable 'sprite-batch-intercept-keyboard-quit nil)
-        (should-not sprite-batch-mode)
-        (should (null (lookup-key global-map [remap keyboard-quit]))))
-    (sprite-batch-mode -1)))
+        (global-sprite-batch-mode 1)
+        (with-temp-buffer
+          (fundamental-mode)
+          (should sprite-batch-mode)))
+    (global-sprite-batch-mode -1)))
+
+(ert-deftest sprite-batch/cancel-logs-progress ()
+  "Cancelling logs the batch id, name and how far it got."
+  (sprite-batch-test--with-fake-timers
+    (let (msgs)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest a) (push (apply #'format fmt a) msgs))))
+        (sprite-run-batch :operations (list #'ignore #'ignore #'ignore) :name "job")
+        (funcall (cadr (pop sprite-batch-test--timers)))
+        (sprite-batch-cancel :all)
+        (should (cl-some (lambda (m) (string-match-p "cancelled #[0-9]+ job at 1/3 ops completed" m))
+                         msgs))
+        ;; quit during an op reports the reason
+        (setq msgs nil)
+        (sprite-run-batch :operations (list (lambda () (signal 'quit nil))) :name "q")
+        (sprite-batch-test--drain)
+        (should (cl-some (lambda (m) (string-match-p "cancelled #[0-9]+ q at 0/1.*interrupted by quit" m))
+                         msgs))))))
+
+(ert-deftest sprite-batch/menu-without-quit-entry ()
+  "The explicit cancel command's menu has no quit entry."
+  (sprite-batch-test--with-fake-timers
+    (sprite-run-batch :operations (list #'ignore) :name "a")
+    (let (table)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p tbl &rest _) (setq table tbl) "Do nothing")))
+        (sprite-batch-cancel-menu)
+        (should-not (member "Quit current operation" table))))))
 
 (provide 'test-sprite-batch)
 ;;; test-sprite-batch.el ends here

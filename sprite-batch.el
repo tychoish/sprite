@@ -7,7 +7,8 @@
 ;; Sequential batch execution of operations yielding between tasks via idle
 ;; timers, with argument passing, error isolation, slow-op logging, and
 ;; execution in designated frame and buffer contexts.
-;; Provides ACR-backed cancellation and keyboard-quit interception.
+;; Cancel with `sprite-batch-cancel' (ACR menu).  Opt in to `C-g' / `C-x C-g'
+;; keys with `sprite-batch-mode' (buffer) or `global-sprite-batch-mode'.
 
 ;;; Code:
 
@@ -20,8 +21,6 @@
   "Yielding batch execution for sprite."
   :group 'tools
   :prefix "sprite-batch-")
-
-(declare-function annotated-completing-read "annotated-completing-read" (table &rest args))
 
 (cl-defstruct (sprite-batch-handle (:constructor sprite-batch-handle--make) (:copier nil))
   "Handle for an active batch execution."
@@ -43,6 +42,12 @@
 (defun sprite-batch-active-handles ()
   "Return a copy of the currently active `sprite-batch-handle' instances."
   (copy-sequence sprite-batch--active-handles))
+
+(defun sprite-batch--progress (handle)
+  "Return HANDLE's progress as \"N/TOTAL\", or \"N\" when TOTAL is unknown."
+  (let ((curr (sprite-batch-handle-current handle))
+        (tot (sprite-batch-handle-total handle)))
+    (if tot (format "%d/%d" curr tot) (format "%d" curr))))
 
 (defmacro sprite-batch--with-context (frame buffer &rest body)
   "Execute BODY with optional FRAME and BUFFER context.
@@ -146,8 +151,9 @@ Return a cancellation function."
         (letrec ((timer nil)
                  ;; Move HANDLE from `running' to STATE exactly once.
                  ;; Return non-nil only for the call that made the transition.
+                 ;; Cancellation logs how far the batch got.
                  (finish
-                  (lambda (state)
+                  (lambda (state &optional reason)
                     (when (eq (sprite-batch-handle-state handle) 'running)
                       (setf (sprite-batch-handle-state handle) state
                             (sprite-batch-handle-timer handle) nil)
@@ -155,6 +161,12 @@ Return a cancellation function."
                       (setq timer nil
                             sprite-batch--active-handles
                             (delq handle sprite-batch--active-handles))
+                      (when (eq state 'cancelled)
+                        (message "[sprite] cancelled #%d %s at %s ops completed%s"
+                                 (sprite-batch-handle-id handle)
+                                 (sprite-batch-handle-name handle)
+                                 (sprite-batch--progress handle)
+                                 (if reason (format " (%s)" reason) "")))
                       t)))
                  (cancel-fn (lambda () (funcall finish 'cancelled)))
                  (schedule
@@ -183,9 +195,8 @@ Return a cancellation function."
                           (condition-case nil
                               (sprite-batch--execute-operation
                                (cdr next) fn-args frame buffer log-prefix)
-                            (quit (funcall finish 'cancelled)
-                                  (message "[sprite] %s cancelled by quit"
-                                           (sprite-batch-handle-name handle))))
+                            (quit (funcall finish 'cancelled
+                                           "interrupted by quit during an operation")))
                           (cl-incf (sprite-batch-handle-current handle))
                           (when (eq (sprite-batch-handle-state handle) 'running)
                             (funcall schedule delay-sec))))))))
@@ -258,91 +269,84 @@ Return the list of handles that were actually cancelled."
 
 (defun sprite-batch--annotation (handle)
   "Return the progress annotation for HANDLE."
-  (let ((curr (sprite-batch-handle-current handle))
-        (tot (sprite-batch-handle-total handle)))
-    (if tot (format "%d/%d completed" curr tot) (format "%d completed" curr))))
+  (format "%s completed" (sprite-batch--progress handle)))
 
 ;;;###autoload
-(defun sprite-batch-cancel-menu ()
-  "Interactively select an active batch to cancel, cancel all, or quit.
-Choosing the quit entry (or an empty answer) calls `keyboard-quit'."
+(defun sprite-batch-cancel-menu (&optional include-quit)
+  "Interactively select an active batch to cancel, cancel all, or do nothing.
+With INCLUDE-QUIT, also offer (as the default) \"Quit current operation\",
+the stock `keyboard-quit', which leaves batches running.  Pressing `C-g'
+inside the menu aborts it as a normal quit."
   (interactive)
   (let ((active (sprite-batch-active-handles)))
     (if (null active)
         (progn (message "[sprite-batch] No active batches running") nil)
-      (let* ((quit-candidate "Quit / Cancel normal operation")
+      (let* ((quit-candidate "Quit current operation")
              (all-candidate "Cancel ALL active batches")
+             (nothing-candidate "Do nothing")
              (table (append
-                     (list (cons quit-candidate "Pass through to keyboard-quit"))
+                     (when include-quit
+                       (list (cons quit-candidate "Normal C-g; batches keep running")))
                      (mapcar (lambda (h) (cons (sprite-batch--candidate h)
                                                (sprite-batch--annotation h)))
                              active)
                      (when (cdr active)
                        (list (cons all-candidate
-                                   (format "%d batches active" (length active)))))))
-             (choice (if (fboundp 'annotated-completing-read)
-                         (annotated-completing-read
-                          table :prompt "Select batch to cancel: "
-                          :require-match t :default quit-candidate)
-                       (completing-read "Select batch to cancel: " table
-                                        nil t nil nil quit-candidate))))
+                                   (format "%d batches active" (length active)))))
+                     (list (cons nothing-candidate "Dismiss this menu"))))
+             (choice (sprite--annotated-or-plain-read
+                      "Select batch to cancel: " table
+                      (and include-quit quit-candidate))))
         (cond
+         ((string= choice nothing-candidate) nil)
          ((member choice (list nil "" quit-candidate))
           (keyboard-quit))
          ((string= choice all-candidate)
-          (let ((n (length (sprite-batch-cancel :all))))
-            (message "[sprite-batch] Cancelled %d batch(es)" n)))
+          (sprite-batch-cancel :all))
          (t
           (let ((handle (cl-find choice active :key #'sprite-batch--candidate
                                  :test #'string=)))
-            (if (and handle (sprite-batch-cancel handle))
-                (message "[sprite-batch] Cancelled %s" choice)
+            (unless (and handle (sprite-batch-cancel handle))
               (message "[sprite-batch] Batch %s no longer active" choice)))))))))
 
 ;;;###autoload
-(defun sprite-batch-cancel-or-quit ()
-  "Cancel an in-flight batch, or pass through to `keyboard-quit'.
-When background batches are active, present an ACR menu allowing cancellation
-of specific batches or continuing to normal keyboard quit.
-When no batches are running, or when invoked within the minibuffer or an active
-region, immediately call `keyboard-quit'."
-  (interactive)
-  (if (or (minibufferp)
+(defun sprite-batch-cancel-or-quit (&optional force-quit)
+  "Offer `sprite-batch-cancel-menu' when batches are running, else quit.
+Behaves exactly like `keyboard-quit' when no batches are active, inside the
+minibuffer, with an active region, or with FORCE-QUIT (\\[universal-argument])."
+  (interactive "P")
+  (if (or force-quit
+          (minibufferp)
           (use-region-p)
           (null sprite-batch--active-handles))
       (keyboard-quit)
-    (sprite-batch-cancel-menu)))
+    (sprite-batch-cancel-menu t)))
 
-(defun sprite-batch--sync-remap (enable)
-  "Install (ENABLE non-nil) or remove the `keyboard-quit' remapping."
-  (if enable
-      (define-key global-map [remap keyboard-quit] #'sprite-batch-cancel-or-quit)
-    (when (eq (lookup-key global-map [remap keyboard-quit])
-              #'sprite-batch-cancel-or-quit)
-      (define-key global-map [remap keyboard-quit] nil))))
-
-(defvar sprite-batch-intercept-keyboard-quit)
+;;;###autoload
+(defvar sprite-batch-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [remap keyboard-quit] #'sprite-batch-cancel-or-quit)
+    (define-key map (kbd "C-x C-g") #'sprite-batch-cancel)
+    map)
+  "Keymap for `sprite-batch-mode'.
+`C-g' offers the batch menu while batches run (`C-u C-g' always quits);
+`C-x C-g' opens the cancel menu directly, from anywhere.")
 
 ;;;###autoload
 (define-minor-mode sprite-batch-mode
-  "Global minor mode to intercept `keyboard-quit' for running sprite batches."
-  :global t
-  :group 'sprite-batch
-  (setq sprite-batch-intercept-keyboard-quit sprite-batch-mode)
-  (sprite-batch--sync-remap sprite-batch-mode))
+  "Opt-in batch cancellation keys in the current buffer.
+While batches are running, `C-g' offers a menu to cancel them; otherwise
+`C-g' is the normal `keyboard-quit'.  `C-x C-g' always opens the cancel
+menu.  Without this mode, `C-g' is never altered; use `sprite-batch-cancel'.
+See `global-sprite-batch-mode' to enable it everywhere."
+  :lighter " Batch"
+  :keymap sprite-batch-mode-map
+  :group 'sprite-batch)
 
 ;;;###autoload
-(defcustom sprite-batch-intercept-keyboard-quit nil
-  "When non-nil, remap `keyboard-quit' to `sprite-batch-cancel-or-quit'.
-When active batches are running, `C-g' will present a menu to cancel running
-batches or perform normal keyboard quit.  When no batches are running,
-it behaves identically to `keyboard-quit'.  Equivalent to `sprite-batch-mode'."
-  :type 'boolean
-  :group 'sprite-batch
-  :set (lambda (sym val)
-         (set-default sym val)
-         (sprite-batch--sync-remap val)
-         (setq sprite-batch-mode (and val t))))
+(define-globalized-minor-mode global-sprite-batch-mode
+  sprite-batch-mode sprite-batch-mode
+  :group 'sprite-batch)
 
 (provide 'sprite-batch)
 ;;; sprite-batch.el ends here

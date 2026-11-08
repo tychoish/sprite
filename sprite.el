@@ -242,6 +242,20 @@ is non-nil, and logged if duration exceeds `sprite-slow-op-threshold'."
   "Run startup operation FN in FRAME, reporting errors."
   (sprite-batch--execute-operation fn '(1) frame nil "[startup]"))
 
+(declare-function annotated-completing-read "annotated-completing-read")
+
+(defun sprite--annotated-or-plain-read (prompt candidates &optional default)
+  "Read a candidate string from CANDIDATES, an alist of (NAME . ANNOTATION).
+Uses `annotated-completing-read', showing each ANNOTATION, when that
+package is loaded; otherwise falls back to plain `completing-read' over
+the candidate names, since `annotated-completing-read' is an optional
+dependency.  Specify the text of the PROMPT; DEFAULT is the candidate
+chosen on an empty answer."
+  (if (fboundp 'annotated-completing-read)
+      (apply #'annotated-completing-read candidates :prompt prompt :require-match t
+             (and default (list :default default)))
+    (completing-read prompt (seq-map #'car candidates) nil t nil nil default)))
+
 (defun sprite--make-iterator (sequence)
   "Normalize SEQUENCE into (TOTAL-COUNT . NEXT-FN).
 NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil.
