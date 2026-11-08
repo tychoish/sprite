@@ -34,6 +34,10 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'generator)
+
+(declare-function gen-p "gen" (sequence))
+(declare-function gen--next "gen" (sequence))
 
 ;; server.el variables; server.el is loaded by any running daemon but may be
 ;; absent in batch/test contexts.
@@ -238,7 +242,65 @@ is non-nil, and logged if duration exceeds `sprite-slow-op-threshold'."
   "Run startup operation FN in FRAME, reporting errors."
   (sprite-batch--execute-operation fn '(1) frame nil "[startup]"))
 
+(defun sprite--make-iterator (sequence)
+  "Normalize SEQUENCE into (TOTAL-COUNT . NEXT-FN).
+NEXT-FN is a function of zero arguments returning (IDX . ITEM) or nil.
+SEQUENCE may be nil, a vector, a gen.el stream, a generator iterator,
+or a list."
+  (let ((idx 0))
+    (cond
+     ((null sequence)
+      (cons 0 (lambda () nil)))
+     ((vectorp sequence)
+      (let ((total (length sequence)))
+        (cons total
+              (lambda ()
+                (when (< idx total)
+                  (let ((curr idx))
+                    (setq idx (1+ idx))
+                    (cons curr (aref sequence curr))))))))
+     ;; gen struct duck-typing (gen-p or has gen--next)
+     ((and (fboundp 'gen-p) (funcall 'gen-p sequence))
+      (cons nil
+            (lambda ()
+              (let ((v (funcall 'gen--next sequence)))
+                (when v
+                  (let ((curr idx))
+                    (setq idx (1+ idx))
+                    (cons curr (car v))))))))
+     ;; generator.el iterators, functions, or closures
+     ;; Note: in Emacs 29, closures satisfy `functionp' and `listp';
+     ;; checking `functionp' before `listp' prevents misidentifying
+     ;; generator iterators as lists.
+     ((functionp sequence)
+      (cons nil
+            (lambda ()
+              (condition-case nil
+                  (let ((item (iter-next sequence))
+                        (curr idx))
+                    (setq idx (1+ idx))
+                    (cons curr item))
+                (iter-end-of-sequence nil)))))
+     ((listp sequence)
+      (let ((total (length sequence))
+            (remaining sequence))
+        (cons total
+              (lambda ()
+                (when remaining
+                  (let ((curr idx)
+                        (item (pop remaining)))
+                    (setq idx (1+ idx))
+                    (cons curr item)))))))
+     (t
+      (cons nil
+            (lambda ()
+              (condition-case nil
+                  (let ((item (iter-next sequence))
+                        (curr idx))
+                    (setq idx (1+ idx))
+                    (cons curr item))
+                (iter-end-of-sequence nil))))))))
+
 (provide 'sprite)
 (require 'sprite-batch)
-;;; sprite.el ends here
 ;;; sprite.el ends here
