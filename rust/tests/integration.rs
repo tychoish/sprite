@@ -221,15 +221,24 @@ fn daemon_killed_mid_response_raises_clean_error_against_live_daemon() {
     // Emacs has actually read and is busy evaluating) would otherwise
     // produce indistinguishably from a normal completed response.
     let pid = daemon.child.id();
-    let _ = std::process::Command::new("kill")
-        .args(["-STOP", &pid.to_string()])
-        .status();
+    // Signal the child directly: minimal CI containers need not have a
+    // standalone `kill` executable, and silently ignoring that failure
+    // lets the evaluation finish normally.
+    let signal = move |signal| {
+        // SAFETY: kill only receives the PID of our disposable child and
+        // a valid signal number; it does not access Rust memory.
+        let rc = unsafe { libc::kill(pid as libc::pid_t, signal) };
+        if rc == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    };
+    signal(libc::SIGSTOP).expect("failed to stop disposable daemon");
 
     let killer = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(300));
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
+        signal(libc::SIGKILL).expect("failed to kill disposable daemon");
     });
 
     let form = list(vec![
