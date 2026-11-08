@@ -1125,63 +1125,8 @@ and `sprite-communication-fallback' is non-nil."
     (sprite-run-startup-operations)
     (should (equal order '(op)))))
 
-(ert-deftest sprite/run-generic-batch-sync ()
-  "sprite-run executes operations with arglist in batch mode."
-  (let ((results nil)
-        (done nil)
-        (noninteractive t))
-    (sprite-run
-     :operations (list (lambda () (push 'zero results))
-                       (lambda (x y) (push (+ x y) results)))
-     :arglist '(10 20)
-     :log-prefix "[test-run]"
-     :on-done (lambda () (setq done t)))
-    (should (equal (reverse results) '(zero 30)))
-    (should (eq done t))))
-
-(ert-deftest sprite/run-generic-ops-alias ()
-  "sprite-run accepts :ops as an alias for :operations."
-  (let ((results nil)
-        (noninteractive t))
-    (sprite-run :ops (list (lambda () (push 'ok results))))
-    (should (equal results '(ok)))))
-
-(defvar sprite-test--fake-hook nil)
-
-(ert-deftest sprite/run-generic-hook-symbol ()
-  "sprite-run can take a symbol whose value is a list of functions."
-  (let* ((order nil)
-         (noninteractive t)
-         (sprite-test--fake-hook (list (lambda (arg) (push (cons 1 arg) order))
-                                       (lambda (arg) (push (cons 2 arg) order)))))
-    (sprite-run :operations 'sprite-test--fake-hook :arglist 'active)
-    (should (equal (reverse order) '((1 . active) (2 . active))))))
-
-(ert-deftest sprite/run-generic-initial-delay-and-cancellation ()
-  "sprite-run schedules with run-after and cancellation stops execution."
-  (let ((noninteractive nil)
-        (executed nil)
-        (timers nil))
-    (cl-letf (((symbol-function 'run-with-idle-timer)
-               (lambda (secs repeat fn &rest args)
-                 (let ((rec (list secs fn)))
-                   (push rec timers)
-                   rec)))
-              ((symbol-function 'cancel-timer)
-               (lambda (timer)
-                 (setq timers (delete timer timers)))))
-      ;; Test :run-after
-      (let ((cancel-fn (sprite-run :operations (list (lambda () (setq executed t)))
-                                   :run-after 2.5
-                                   :delay 0.5)))
-        ;; Timer was registered with 2.5
-        (should (= (caar timers) 2.5))
-        ;; Calling cancellation function cancels timer
-        (funcall cancel-fn)
-        (should (null timers))))))
-
 (ert-deftest sprite/run-startup-operations-with-run-after ()
-  "sprite-run-startup-operations forwards :run-after to sprite-run."
+  "sprite-run-startup-operations forwards :run-after to sprite-run-batch."
   (let ((sprite-startup-operations (list (lambda () t)))
         (noninteractive nil)
         (timers nil))

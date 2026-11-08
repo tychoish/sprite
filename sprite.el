@@ -230,95 +230,15 @@ is non-nil, and logged if duration exceeds `sprite-slow-op-threshold'."
            (message "[op]: <sprite> %s: %.06fs" ,name duration)))
        res)))
 
-(defun sprite--execute-operation (fn &optional arglist frame log-prefix)
-  "Run operation FN with ARGLIST in FRAME, reporting errors.
-When `sprite-slow-op-reporting' or `init-file-debug' is non-nil,
-log operation duration with LOG-PREFIX if it exceeds `sprite-slow-op-threshold'."
-  (condition-case err
-      (when (or (null frame) (frame-live-p frame))
-        (with-selected-frame (or frame (selected-frame))
-          (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
-            (autoload-do-load (symbol-function fn) fn))
-          (with-sprite-slow-op-timer (format "%s %s" (or log-prefix "[run]") fn)
-            (if (equal (cdr (func-arity fn)) 0)
-                (funcall fn)
-              (apply fn (ensure-list arglist))))))
-    (error (message "[sprite] %s failed: %s" fn (error-message-string err)))))
+(defun sprite--execute-operation (fn &optional args frame log-prefix buffer)
+  "Run operation FN with ARGS in FRAME and BUFFER context, reporting errors."
+  (sprite-batch--execute-operation fn args frame buffer log-prefix))
 
 (defun sprite--execute-startup-operation (fn &optional frame)
-  "Run startup operation FN in FRAME, reporting errors.
-When `sprite-slow-op-reporting' or `init-file-debug' is non-nil,
-log operation duration if it exceeds `sprite-slow-op-threshold'."
-  (sprite--execute-operation fn '(1) frame "[startup]"))
-
-;;;###autoload
-(cl-defun sprite-run (&key operations ops (delay 0.1) run-after initial-delay
-                           arglist on-done frame (log-prefix "[run]"))
-  "Run OPERATIONS in order, yielding between each in interactive sessions.
-OPERATIONS (or OPS) may be a list of functions, a single function,
-or a symbol whose value is a list of functions (such as a hook).
-
-Supported keyword arguments:
-  :operations or :ops
-    List of operations, single function, or hook symbol.
-  :run-after or :initial-delay SECONDS
-    Initial delay before the first operation (defaults to :delay).
-  :delay SECONDS
-    Amount of idle time between operations (defaults to 0.1).
-  :arglist LIST or ATOM
-    Arguments passed to any non-nilary operation.
-  :on-done FUNCTION
-    Callback invoked when all operations finish.
-  :frame FRAME
-    Optional frame context for `with-selected-frame'.
-  :log-prefix STRING
-    Timer log prefix (defaults to \"[run]\").
-
-In noninteractive (batch) sessions, runs all operations synchronously.
-Return a cancellation function."
-  (let* ((source (or operations ops))
-         (items (cond ((and (symbolp source) (boundp source)
-                            (listp (symbol-value source)))
-                       (symbol-value source))
-                      (t (ensure-list source))))
-         (wait (or run-after initial-delay delay))
-         (args (ensure-list arglist)))
-    (if (or noninteractive (null items))
-        (progn
-          (seq-do (lambda (op)
-                    (sprite--execute-operation op args frame log-prefix))
-                  items)
-          (when on-done (funcall on-done))
-          #'ignore)
-      (let* ((queue (copy-sequence items))
-             (timer nil)
-             (step nil))
-        (setq step (lambda ()
-                     (when queue
-                       (sprite--execute-operation (pop queue) args frame log-prefix)
-                       (if queue
-                           (setq timer (run-with-idle-timer delay nil step))
-                         (when on-done (funcall on-done))))))
-        (setq timer (run-with-idle-timer wait nil step))
-        (lambda ()
-          (setq queue nil)
-          (when timer
-            (cancel-timer timer)))))))
-
-;;;###autoload
-(defun sprite-run-startup-operations (&optional operations &rest args)
-  "Run startup OPERATIONS yielding between each in interactive sessions.
-OPERATIONS defaults to `sprite-startup-operations'.
-Supported ARGS keyword arguments include :delay, :run-after, :on-done, :frame.
-Specialized case of `sprite-run' with default arglist `(1)' and log
-prefix \"[startup]\"."
-  (let ((kwargs (if (keywordp operations)
-                    (cons operations args)
-                  (append (list :operations (or operations sprite-startup-operations))
-                          args))))
-    (apply #'sprite-run (append kwargs (list :operations sprite-startup-operations
-                                             :arglist '(1)
-                                             :log-prefix "[startup]")))))
+  "Run startup operation FN in FRAME, reporting errors."
+  (sprite-batch--execute-operation fn '(1) frame nil "[startup]"))
 
 (provide 'sprite)
+(require 'sprite-batch)
+;;; sprite.el ends here
 ;;; sprite.el ends here
