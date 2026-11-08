@@ -16,6 +16,11 @@
 (require 'subr-x)
 (require 'sprite)
 
+(defgroup sprite-batch nil
+  "Yielding batch execution for sprite."
+  :group 'tools
+  :prefix "sprite-batch-")
+
 (declare-function annotated-completing-read "annotated-completing-read" (table &rest args))
 
 (cl-defstruct (sprite-batch-handle (:constructor sprite-batch-handle--make) (:copier nil))
@@ -110,7 +115,8 @@ Return a cancellation function."
   (let* ((source (or operations ops))
          (items (cond ((and (symbolp source) (boundp source)
                             (listp (symbol-value source)))
-                       (symbol-value source))
+                       ;; Hooks may contain `t' (run the global value); drop it.
+                       (remq t (symbol-value source)))
                       ((and (symbolp source) (fboundp source))
                        (list source))
                       ((and (functionp source)
@@ -125,66 +131,67 @@ Return a cancellation function."
          (delay-sec (or delay 0.1))
          (fn-args (ensure-list (or args arglist))))
     (if (or noninteractive (eq total 0))
-        (progn
-          (let ((next (funcall next-fn)))
-            (while next
-              (let ((op (cdr next)))
-                (sprite-batch--execute-operation op fn-args frame buffer log-prefix))
-              (setq next (funcall next-fn))))
+        (let (next)
+          (while (setq next (funcall next-fn))
+            (sprite-batch--execute-operation (cdr next) fn-args frame buffer log-prefix))
           (when on-done (funcall on-done))
           #'ignore)
       (let* ((batch-id (cl-incf sprite-batch--id-counter))
-             (batch-name (or name log-prefix (format "batch-%d" batch-id)))
              (handle (sprite-batch-handle--make
                       :id batch-id
-                      :name batch-name
+                      :name (or name (format "batch-%d" batch-id))
                       :state 'running
-                      :current 0
                       :total total
-                      :timer nil
-                      :cancel-fn nil
                       :created-at (current-time))))
         (letrec ((timer nil)
-                 (cancel-fn
-                  (lambda ()
+                 ;; Move HANDLE from `running' to STATE exactly once.
+                 ;; Return non-nil only for the call that made the transition.
+                 (finish
+                  (lambda (state)
                     (when (eq (sprite-batch-handle-state handle) 'running)
-                      (setf (sprite-batch-handle-state handle) 'cancelled)
-                      (when timer
-                        (cancel-timer timer)
-                        (setq timer nil))
-                      (setf (sprite-batch-handle-timer handle) nil)
-                      (setq sprite-batch--active-handles
+                      (setf (sprite-batch-handle-state handle) state
+                            (sprite-batch-handle-timer handle) nil)
+                      (when timer (cancel-timer timer))
+                      (setq timer nil
+                            sprite-batch--active-handles
                             (delq handle sprite-batch--active-handles))
                       t)))
+                 (cancel-fn (lambda () (funcall finish 'cancelled)))
+                 (schedule
+                  (lambda (secs)
+                    (setq timer (run-with-idle-timer secs nil step))
+                    (setf (sprite-batch-handle-timer handle) timer)))
                  (step
                   (lambda ()
-                    (if (not (eq (sprite-batch-handle-state handle) 'running))
-                        (progn
-                          (when timer (cancel-timer timer))
-                          (setq sprite-batch--active-handles
-                                (delq handle sprite-batch--active-handles)))
-                      (let ((next (funcall next-fn)))
-                        (if next
-                            (let ((op (cdr next)))
-                              (cl-incf (sprite-batch-handle-current handle))
-                              (sprite-batch--execute-operation op fn-args frame buffer log-prefix)
-                              (if (eq (sprite-batch-handle-state handle) 'running)
-                                  (let ((next-timer (run-with-idle-timer delay-sec nil step)))
-                                    (setq timer next-timer)
-                                    (setf (sprite-batch-handle-timer handle) next-timer))
-                                (when timer (cancel-timer timer))
-                                (setq sprite-batch--active-handles
-                                      (delq handle sprite-batch--active-handles))))
-                          (setf (sprite-batch-handle-state handle) 'done)
-                          (setf (sprite-batch-handle-timer handle) nil)
-                          (setq sprite-batch--active-handles
-                                (delq handle sprite-batch--active-handles))
-                          (when on-done (funcall on-done))))))))
+                    (setq timer nil)
+                    (when (eq (sprite-batch-handle-state handle) 'running)
+                      (let ((next (condition-case err (funcall next-fn)
+                                    (error
+                                     (message "[sprite] %s iterator failed: %s"
+                                              (sprite-batch-handle-name handle)
+                                              (error-message-string err))
+                                     nil))))
+                        (if (null next)
+                            (when (funcall finish 'done)
+                              (when on-done
+                                (condition-case err (funcall on-done)
+                                  (error (message "[sprite] %s on-done failed: %s"
+                                                  (sprite-batch-handle-name handle)
+                                                  (error-message-string err))))))
+                          ;; C-g during an operation cancels the batch instead
+                          ;; of leaving it registered but never rescheduled.
+                          (condition-case nil
+                              (sprite-batch--execute-operation
+                               (cdr next) fn-args frame buffer log-prefix)
+                            (quit (funcall finish 'cancelled)
+                                  (message "[sprite] %s cancelled by quit"
+                                           (sprite-batch-handle-name handle))))
+                          (cl-incf (sprite-batch-handle-current handle))
+                          (when (eq (sprite-batch-handle-state handle) 'running)
+                            (funcall schedule delay-sec))))))))
           (setf (sprite-batch-handle-cancel-fn handle) cancel-fn)
           (push handle sprite-batch--active-handles)
-          (let ((first-timer (run-with-idle-timer wait nil step)))
-            (setq timer first-timer)
-            (setf (sprite-batch-handle-timer handle) first-timer))
+          (funcall schedule wait)
           cancel-fn)))))
 
 ;;;###autoload
@@ -223,102 +230,74 @@ TARGET may be:
 - A `sprite-batch-handle' instance
 - An integer batch ID
 - A cancellation function returned by `sprite-run-batch'
-- nil (or interactively with no prefix): prompt via `sprite-batch-cancel-menu'.
-Return the list of cancelled handles."
+- nil: interactively, prompt via `sprite-batch-cancel-menu'; from Lisp,
+  same as `:all'.
+Return the list of handles that were actually cancelled."
   (interactive)
-  (cond
-   ((eq target :all)
-    (let ((handles (copy-sequence sprite-batch--active-handles)))
-      (dolist (h handles)
-        (when (sprite-batch-handle-cancel-fn h)
-          (funcall (sprite-batch-handle-cancel-fn h))))
-      (when (called-interactively-p 'interactive)
-        (message "[sprite-batch] Cancelled %d batches" (length handles)))
-      handles))
-   ((null target)
-    (if (called-interactively-p 'interactive)
-        (sprite-batch-cancel-menu)
-      (let ((handles (copy-sequence sprite-batch--active-handles)))
-        (dolist (h handles)
-          (when (sprite-batch-handle-cancel-fn h)
-            (funcall (sprite-batch-handle-cancel-fn h))))
-        handles)))
-   ((sprite-batch-handle-p target)
-    (when (sprite-batch-handle-cancel-fn target)
-      (funcall (sprite-batch-handle-cancel-fn target)))
-    (when (called-interactively-p 'interactive)
-      (message "[sprite-batch] Cancelled batch #%d (%s)"
-               (sprite-batch-handle-id target)
-               (sprite-batch-handle-name target)))
-    (list target))
-   ((integerp target)
-    (let ((handle (cl-find target sprite-batch--active-handles
-                           :key #'sprite-batch-handle-id)))
-      (when handle
-        (when (sprite-batch-handle-cancel-fn handle)
-          (funcall (sprite-batch-handle-cancel-fn handle)))
-        (when (called-interactively-p 'interactive)
-          (message "[sprite-batch] Cancelled batch #%d (%s)"
-                   (sprite-batch-handle-id handle)
-                   (sprite-batch-handle-name handle)))
-        (list handle))))
-   ((functionp target)
-    (let ((handle (cl-find target sprite-batch--active-handles
-                           :key #'sprite-batch-handle-cancel-fn)))
-      (funcall target)
-      (and handle (list handle))))
-   (t
-    (user-error "Unknown batch target: %S" target))))
+  (if (and (null target) (called-interactively-p 'interactive))
+      (sprite-batch-cancel-menu)
+    (let ((handles
+           (cond
+            ((memq target '(nil :all)) (copy-sequence sprite-batch--active-handles))
+            ((sprite-batch-handle-p target) (list target))
+            ((integerp target)
+             (seq-filter (lambda (h) (= (sprite-batch-handle-id h) target))
+                         sprite-batch--active-handles))
+            ((functionp target)
+             (seq-filter (lambda (h) (eq (sprite-batch-handle-cancel-fn h) target))
+                         sprite-batch--active-handles))
+            (t (user-error "Unknown batch target: %S" target)))))
+      (seq-filter (lambda (h)
+                    (let ((fn (sprite-batch-handle-cancel-fn h)))
+                      (and fn (funcall fn))))
+                  handles))))
+
+(defun sprite-batch--candidate (handle)
+  "Return the completion candidate string for HANDLE."
+  (format "#%d: %s" (sprite-batch-handle-id handle) (sprite-batch-handle-name handle)))
+
+(defun sprite-batch--annotation (handle)
+  "Return the progress annotation for HANDLE."
+  (let ((curr (sprite-batch-handle-current handle))
+        (tot (sprite-batch-handle-total handle)))
+    (if tot (format "%d/%d completed" curr tot) (format "%d completed" curr))))
 
 ;;;###autoload
 (defun sprite-batch-cancel-menu ()
-  "Interactively select an active batch to cancel, cancel all, or quit."
+  "Interactively select an active batch to cancel, cancel all, or quit.
+Choosing the quit entry (or an empty answer) calls `keyboard-quit'."
   (interactive)
   (let ((active (sprite-batch-active-handles)))
     (if (null active)
-        (progn
-          (message "[sprite-batch] No active batches running")
-          nil)
+        (progn (message "[sprite-batch] No active batches running") nil)
       (let* ((quit-candidate "Quit / Cancel normal operation")
-             (quit-annotation "Pass through to keyboard-quit")
              (all-candidate "Cancel ALL active batches")
-             (all-annotation (format "%d batches active" (length active)))
-             (candidates nil))
-        (push (cons quit-candidate quit-annotation) candidates)
-        (dolist (h active)
-          (let* ((id (sprite-batch-handle-id h))
-                 (name (sprite-batch-handle-name h))
-                 (curr (sprite-batch-handle-current h))
-                 (tot (sprite-batch-handle-total h))
-                 (cand (format "#%d: %s" id name))
-                 (ann (if tot
-                          (format "%d/%d completed" curr tot)
-                        (format "%d completed" curr))))
-            (push (cons cand ann) candidates)))
-        (when (> (length active) 1)
-          (push (cons all-candidate all-annotation) candidates))
-        (setq candidates (nreverse candidates))
-        (let* ((choice (if (fboundp 'annotated-completing-read)
-                           (annotated-completing-read
-                            candidates
-                            :prompt "Select batch to cancel: "
-                            :require-match t
-                            :default quit-candidate)
-                         (completing-read "Select batch to cancel: "
-                                          candidates
-                                          nil t nil nil quit-candidate))))
-          (cond
-           ((or (null choice) (string= choice "") (string= choice quit-candidate))
-            (keyboard-quit))
-           ((string= choice all-candidate)
-            (sprite-batch-cancel :all))
-           (t
-            (let* ((id (and (string-match "\\`#\\([0-9]+\\):" choice)
-                            (string-to-number (match-string 1 choice))))
-                   (handle (and id (cl-find id active :key #'sprite-batch-handle-id))))
-              (if handle
-                  (sprite-batch-cancel handle)
-                (message "[sprite-batch] Batch %s no longer active" choice))))))))))
+             (table (append
+                     (list (cons quit-candidate "Pass through to keyboard-quit"))
+                     (mapcar (lambda (h) (cons (sprite-batch--candidate h)
+                                               (sprite-batch--annotation h)))
+                             active)
+                     (when (cdr active)
+                       (list (cons all-candidate
+                                   (format "%d batches active" (length active)))))))
+             (choice (if (fboundp 'annotated-completing-read)
+                         (annotated-completing-read
+                          table :prompt "Select batch to cancel: "
+                          :require-match t :default quit-candidate)
+                       (completing-read "Select batch to cancel: " table
+                                        nil t nil nil quit-candidate))))
+        (cond
+         ((member choice (list nil "" quit-candidate))
+          (keyboard-quit))
+         ((string= choice all-candidate)
+          (let ((n (length (sprite-batch-cancel :all))))
+            (message "[sprite-batch] Cancelled %d batch(es)" n)))
+         (t
+          (let ((handle (cl-find choice active :key #'sprite-batch--candidate
+                                 :test #'string=)))
+            (if (and handle (sprite-batch-cancel handle))
+                (message "[sprite-batch] Cancelled %s" choice)
+              (message "[sprite-batch] Batch %s no longer active" choice)))))))))
 
 ;;;###autoload
 (defun sprite-batch-cancel-or-quit ()
@@ -334,33 +313,36 @@ region, immediately call `keyboard-quit'."
       (keyboard-quit)
     (sprite-batch-cancel-menu)))
 
-;;;###autoload
-(defcustom sprite-batch-intercept-keyboard-quit nil
-  "When non-nil, remap `keyboard-quit' to `sprite-batch-cancel-or-quit'.
-When active batches are running, `C-g' will present a menu to cancel running
-batches or perform normal keyboard quit.  When no batches are running,
-it behaves identically to `keyboard-quit'."
-  :type 'boolean
-  :group 'sprite-batch
-  :set (lambda (sym val)
-         (set-default sym val)
-         (if val
-             (define-key global-map [remap keyboard-quit] #'sprite-batch-cancel-or-quit)
-           (when (eq (lookup-key global-map [remap keyboard-quit]) #'sprite-batch-cancel-or-quit)
-             (define-key global-map [remap keyboard-quit] nil)))))
+(defun sprite-batch--sync-remap (enable)
+  "Install (ENABLE non-nil) or remove the `keyboard-quit' remapping."
+  (if enable
+      (define-key global-map [remap keyboard-quit] #'sprite-batch-cancel-or-quit)
+    (when (eq (lookup-key global-map [remap keyboard-quit])
+              #'sprite-batch-cancel-or-quit)
+      (define-key global-map [remap keyboard-quit] nil))))
+
+(defvar sprite-batch-intercept-keyboard-quit)
 
 ;;;###autoload
 (define-minor-mode sprite-batch-mode
   "Global minor mode to intercept `keyboard-quit' for running sprite batches."
   :global t
   :group 'sprite-batch
-  (if sprite-batch-mode
-      (progn
-        (setq sprite-batch-intercept-keyboard-quit t)
-        (define-key global-map [remap keyboard-quit] #'sprite-batch-cancel-or-quit))
-    (setq sprite-batch-intercept-keyboard-quit nil)
-    (when (eq (lookup-key global-map [remap keyboard-quit]) #'sprite-batch-cancel-or-quit)
-      (define-key global-map [remap keyboard-quit] nil))))
+  (setq sprite-batch-intercept-keyboard-quit sprite-batch-mode)
+  (sprite-batch--sync-remap sprite-batch-mode))
+
+;;;###autoload
+(defcustom sprite-batch-intercept-keyboard-quit nil
+  "When non-nil, remap `keyboard-quit' to `sprite-batch-cancel-or-quit'.
+When active batches are running, `C-g' will present a menu to cancel running
+batches or perform normal keyboard quit.  When no batches are running,
+it behaves identically to `keyboard-quit'.  Equivalent to `sprite-batch-mode'."
+  :type 'boolean
+  :group 'sprite-batch
+  :set (lambda (sym val)
+         (set-default sym val)
+         (sprite-batch--sync-remap val)
+         (setq sprite-batch-mode (and val t))))
 
 (provide 'sprite-batch)
 ;;; sprite-batch.el ends here

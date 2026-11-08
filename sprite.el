@@ -268,20 +268,10 @@ or a list."
                   (let ((curr idx))
                     (setq idx (1+ idx))
                     (cons curr (car v))))))))
-     ;; generator.el iterators, functions, or closures
-     ;; Note: in Emacs 29, closures satisfy `functionp' and `listp';
-     ;; checking `functionp' before `listp' prevents misidentifying
-     ;; generator iterators as lists.
-     ((functionp sequence)
-      (cons nil
-            (lambda ()
-              (condition-case nil
-                  (let ((item (iter-next sequence))
-                        (curr idx))
-                    (setq idx (1+ idx))
-                    (cons curr item))
-                (iter-end-of-sequence nil)))))
-     ((listp sequence)
+     ;; Check `functionp' before `listp': in Emacs 29 closures are lists, so
+     ;; the list branch must exclude functions to avoid treating generator
+     ;; iterators as lists.
+     ((and (listp sequence) (not (functionp sequence)))
       (let ((total (length sequence))
             (remaining sequence))
         (cons total
@@ -291,6 +281,8 @@ or a list."
                         (item (pop remaining)))
                     (setq idx (1+ idx))
                     (cons curr item)))))))
+     ;; generator.el iterators (functions/closures) and anything else
+     ;; that `iter-next' accepts.
      (t
       (cons nil
             (lambda ()

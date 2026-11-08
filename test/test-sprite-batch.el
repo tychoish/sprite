@@ -321,5 +321,131 @@
         (should (null (lookup-key global-map [remap keyboard-quit]))))
     (sprite-batch-mode -1)))
 
+;; --- review follow-up tests ---
+(defvar sprite-batch-test--timers nil)
+(defvar sprite-batch-test-hook nil)
+
+(defmacro sprite-batch-test--with-fake-timers (&rest body)
+  "Run BODY with idle timers captured in `sprite-batch-test--timers'."
+  (declare (indent 0))
+  `(let ((noninteractive nil) (sprite-batch-test--timers nil) (sprite-batch--active-handles nil))
+     (cl-letf (((symbol-function 'run-with-idle-timer)
+                (lambda (secs _repeat fn &rest _)
+                  (let ((rec (list secs fn))) (push rec sprite-batch-test--timers) rec)))
+               ((symbol-function 'cancel-timer)
+                (lambda (timer) (setq sprite-batch-test--timers (delete timer sprite-batch-test--timers)))))
+       ,@body)))
+
+(defun sprite-batch-test--drain ()
+  "Fire captured timers until none remain ."
+    (let ((n 0))
+    (while (and sprite-batch-test--timers (< n 50))
+      (funcall (cadr (pop sprite-batch-test--timers)))
+      (cl-incf n))))
+
+(ert-deftest sprite-batch/default-name ()
+  "Unnamed batches get a batch-N name rather than the log prefix."
+  (sprite-batch-test--with-fake-timers
+    (sprite-run-batch :operations (list #'ignore))
+    (should (string-match-p "\\`batch-[0-9]+\\'"
+                            (sprite-batch-handle-name (car sprite-batch--active-handles))))))
+
+(ert-deftest sprite-batch/error-isolated-and-on-done ()
+  "A failing operation does not stop later ones; on-done runs once."
+  (sprite-batch-test--with-fake-timers
+    (let ((results nil) (done 0))
+      (sprite-run-batch :operations (list (lambda () (error "boom"))
+                                          (lambda () (push 'ok results)))
+                        :on-done (lambda () (cl-incf done)))
+      (sprite-batch-test--drain)
+      (should (equal results '(ok)))
+      (should (= done 1))
+      (should (null sprite-batch--active-handles)))))
+
+(ert-deftest sprite-batch/on-done-error-contained ()
+  "An error in on-done is reported, and the handle is still finished."
+  (sprite-batch-test--with-fake-timers
+    (sprite-run-batch :operations (list #'ignore)
+                      :on-done (lambda () (error "bad done")))
+    (sprite-batch-test--drain)
+    (should (null sprite-batch--active-handles))))
+
+(ert-deftest sprite-batch/quit-in-operation-cancels ()
+  "C-g (quit) inside an operation cancels the batch and unregisters it."
+  (sprite-batch-test--with-fake-timers
+    (let ((ran nil))
+      (sprite-run-batch :operations (list (lambda () (signal 'quit nil))
+                                          (lambda () (setq ran t))))
+      (sprite-batch-test--drain)
+      (should-not ran)
+      (should (null sprite-batch--active-handles))
+      (should (null sprite-batch-test--timers)))))
+
+(ert-deftest sprite-batch/cancel-during-operation ()
+  "An operation may cancel its own batch; no further step is scheduled."
+  (sprite-batch-test--with-fake-timers
+    (let ((ran nil))
+      (sprite-run-batch :operations (list (lambda () (sprite-batch-cancel :all))
+                                          (lambda () (setq ran t))))
+      (sprite-batch-test--drain)
+      (should-not ran)
+      (should (null sprite-batch--active-handles)))))
+
+(ert-deftest sprite-batch/cancel-returns-only-cancelled ()
+  "Cancelling twice, by fn or unknown id, returns nil the second time."
+  (sprite-batch-test--with-fake-timers
+    (let* ((fn (sprite-run-batch :operations (list #'ignore)))
+           (h (car sprite-batch--active-handles)))
+      (should (equal (sprite-batch-cancel fn) (list h)))
+      (should-not (sprite-batch-cancel fn))
+      (should-not (sprite-batch-cancel h))
+      (should-not (sprite-batch-cancel 99999))
+      (should-error (sprite-batch-cancel "nope") :type 'user-error))))
+
+(ert-deftest sprite-batch/empty-source-runs-on-done ()
+  "An empty operation list runs on-done synchronously and registers nothing."
+  (sprite-batch-test--with-fake-timers
+    (let ((done nil))
+      (sprite-run-batch :operations nil :on-done (lambda () (setq done t)))
+      (should done)
+      (should (null sprite-batch--active-handles)))))
+
+(ert-deftest sprite-batch/hook-symbol-ignores-t ()
+  "The global-value marker `t' in a hook is not run as an operation."
+  (let ((noninteractive t) (results nil)
+        (sprite-batch-test-hook nil))
+    (setq sprite-batch-test-hook (list (lambda () (push 1 results)) t))
+    (sprite-run-batch :operations 'sprite-batch-test-hook)
+    (should (equal results '(1)))))
+
+(ert-deftest sprite-batch/menu-all-stale-and-empty ()
+  "Menu handles cancel-all, stale selections, and no active batches."
+  (sprite-batch-test--with-fake-timers
+    (should-not (sprite-batch-cancel-menu))
+    (sprite-run-batch :operations (list #'ignore) :name "a")
+    (sprite-run-batch :operations (list #'ignore) :name "b")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "Cancel ALL active batches")))
+      (sprite-batch-cancel-menu)
+      (should (null sprite-batch--active-handles)))
+    (sprite-run-batch :operations (list #'ignore) :name "c")
+    (let ((cand (sprite-batch--candidate (car sprite-batch--active-handles))))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) (sprite-batch-cancel :all) cand)))
+        (sprite-batch-cancel-menu)))))
+
+(ert-deftest sprite-batch/intercept-variable-syncs-mode ()
+  "Setting the defcustom via `customize-set-variable' toggles the mode."
+  (unwind-protect
+      (progn
+        (customize-set-variable 'sprite-batch-intercept-keyboard-quit t)
+        (should sprite-batch-mode)
+        (should (eq (lookup-key global-map [remap keyboard-quit])
+                    #'sprite-batch-cancel-or-quit))
+        (customize-set-variable 'sprite-batch-intercept-keyboard-quit nil)
+        (should-not sprite-batch-mode)
+        (should (null (lookup-key global-map [remap keyboard-quit]))))
+    (sprite-batch-mode -1)))
+
 (provide 'test-sprite-batch)
 ;;; test-sprite-batch.el ends here
