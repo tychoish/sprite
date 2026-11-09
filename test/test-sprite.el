@@ -22,14 +22,8 @@
 (require 'map)
 (require 'savehist)
 
-;; Declare argi/argv as special so let-bindings in tests create dynamic
-;; bindings visible to sprite-cli-resolve-id (which is compiled under
-;; lexical-binding but reads these as free dynamic variables).
-(defvar argi)
-(defvar argv)
-
-;; Same reasoning for server-use-tcp/server-auth-dir, read dynamically by
-;; sprite--direct-target.
+;; Declare server-use-tcp/server-auth-dir as special so let-bindings in
+;; tests create dynamic bindings, read dynamically by sprite--direct-target.
 (defvar server-use-tcp)
 (defvar server-auth-dir)
 
@@ -659,31 +653,14 @@ and `sprite-communication-fallback' is non-nil."
     (let ((keys (transient-test/collect-keys 'sprite-list-menu)))
       (should (null (transient-test/key-prefix-conflicts keys))))))
 
-;;;; CLI parsing
+;;;; CLI instance-id resolution
 
-(ert-deftest sprite/cli-resolve-id-long-form ()
-  "Parses --id=NAME."
-  (let ((sprite-cli-instance-id nil)
-        (argi "--id=worker")
-        (argv nil))
-    (sprite-cli-resolve-id)
-    (should (equal "worker" sprite-cli-instance-id))))
-
-(ert-deftest sprite/cli-resolve-id-space-form ()
-  "Parses --id NAME (space separated)."
-  (let ((sprite-cli-instance-id nil)
-        (argi "--id")
-        (argv '("worker")))
-    (sprite-cli-resolve-id)
-    (should (equal "worker" sprite-cli-instance-id))))
-
-(ert-deftest sprite/cli-resolve-id-no-match ()
-  "Non-matching argi leaves sprite-cli-instance-id unchanged."
-  (let ((sprite-cli-instance-id nil)
-        (argi "--other")
-        (argv nil))
-    (sprite-cli-resolve-id)
-    (should (null sprite-cli-instance-id))))
+(ert-deftest sprite/resolve-instance-id-respects-cli-instance-id ()
+  "`sprite-resolve-instance-id' returns `sprite-cli-instance-id' when set."
+  (let ((sprite-instance-id nil)
+        (sprite-cli-instance-id "worker"))
+    (cl-letf (((symbol-function 'daemonp) (lambda () nil)))
+      (should (equal "worker" (sprite-resolve-instance-id))))))
 
 ;;;; Fleet API
 

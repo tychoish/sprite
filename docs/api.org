@@ -109,13 +109,6 @@ Return the instance-scoped filename prefix for /NAME/. Produces HOSTNAME-INSTANC
 
 Return full state-directory path for /NAME/, scoped to host and instance.
 
-*** [[file:../sprite.el::121][sprite-cli-resolve-id]]
-:PROPERTIES:
-:CUSTOM_ID: sprite-cli-resolve-id
-:END:
-
-Parse --id=NAME or --id NAME from ~command-line-functions~ context. Sets ~sprite-cli-instance-id~ when found.
-
 *** [[file:../sprite.el::176][sprite-state-directory]]
 :PROPERTIES:
 :CUSTOM_ID: sprite-state-directory

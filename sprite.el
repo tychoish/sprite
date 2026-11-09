@@ -122,19 +122,6 @@ only when running as root or under a symlinked `user-emacs-directory'."
 
 ;;;; Identity
 
-(defun sprite-cli-resolve-id ()
-  "Parse --id=NAME or --id NAME from `command-line-functions' context.
-Sets `sprite-cli-instance-id' when found."
-  (cond
-   ((string-equal "--id" argi)
-    (setq sprite-cli-instance-id (pop argv)))
-   ((and (> (length argi) 5)
-         (or (string-prefix-p "--id=" argi)
-             (string-prefix-p "--id " argi)))
-    (setq sprite-cli-instance-id (substring argi 5)))))
-
-(add-to-list 'command-line-functions #'sprite-cli-resolve-id)
-
 (defun sprite--format-full-name (parent idx unique-name)
   "Format PARENT, IDX, and UNIQUE-NAME into a sprite full name."
   (format "%s.%d.%s" parent idx unique-name))
