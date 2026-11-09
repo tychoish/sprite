@@ -498,5 +498,114 @@
           (sprite-fleet-test-wait-until (sprite-future-resolved-p future))))
       (should (equal '((:log t) nil) options)))))
 
+;;;; Reactor protocol tests
+
+(ert-deftest sprite-fleet/reactor-concurrency-and-dispatch ()
+  "`sprite-fleet-reactor' leases targets, evaluates forms, and returns targets."
+  (let (dispatched)
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target form &rest _)
+                 (push (cons target form) dispatched)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (sprite-future--settle f :resolved (eval form t))
+                   f))))
+      (let* ((reactor (sprite-fleet-reactor-create
+                       :targets '("w1" "w2")
+                       :form-builder (lambda (x) `(* ,x 10))))
+             (results nil)
+             (errors nil))
+        (should (= 2 (gen-reactor-concurrency reactor)))
+        (gen-reactor-dispatch
+         reactor 3
+         (lambda (res) (push res results))
+         (lambda (err) (push err errors)))
+        (gen-reactor-dispatch
+         reactor 4
+         (lambda (res) (push res results))
+         (lambda (err) (push err errors)))
+        (should (null errors))
+        (should (equal '(40 30) results))
+        (should (= 2 (length (sprite-fleet-reactor-available-targets reactor))))))))
+
+(ert-deftest sprite-fleet/reactor-rejection-calls-err-cb-and-releases-target ()
+  "`sprite-fleet-reactor' invokes err-cb on rejected future and restores target."
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target _form &rest _)
+               (let ((f (sprite-future--make :target target :state :pending)))
+                 (sprite-future--settle f :rejected "remote-boom")
+                 f))))
+    (let* ((reactor (sprite-fleet-reactor-create
+                     :targets '("w1")
+                     :fn-or-form '1+))
+           (results nil)
+           (errors nil))
+      (gen-reactor-dispatch
+       reactor 5
+       (lambda (res) (push res results))
+       (lambda (err) (push err errors)))
+      (should (null results))
+      (should (equal '("remote-boom") errors))
+      (should (equal '("w1") (sprite-fleet-reactor-available-targets reactor))))))
+
+(ert-deftest sprite-fleet/reactor-cancel-aborts-active-futures ()
+  "`gen-reactor-cancel' cancels in-flight futures and restores targets."
+  (let (in-flight)
+    (cl-letf (((symbol-function 'sprite-future-eval)
+               (lambda (target _form &rest _)
+                 (let ((f (sprite-future--make :target target :state :pending)))
+                   (push f in-flight)
+                   f))))
+      (let ((reactor (sprite-fleet-reactor-create
+                      :targets '("w1" "w2")
+                      :fn-or-form 'identity)))
+        (gen-reactor-dispatch reactor 1 #'ignore #'ignore)
+        (should (= 1 (length (sprite-fleet-reactor-available-targets reactor))))
+        (gen-reactor-cancel reactor :test-abort)
+        (should (= 2 (length (sprite-fleet-reactor-available-targets reactor))))
+        (should (sprite-future-rejected-p (car in-flight)))))))
+
+(ert-deftest sprite-fleet/reactor-no-available-targets-handling ()
+  "Reactor signals on empty target creation and calls err-cb when pool exhausted."
+  (cl-letf (((symbol-function 'sprite-get-or-create-fleet) (lambda (_) nil)))
+    (should-error (sprite-fleet-reactor-create :targets nil)))
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target _form &rest _)
+               (sprite-future--make :target target :state :pending))))
+    (let ((reactor (sprite-fleet-reactor-create :targets '("w1")))
+          (errors nil))
+      (gen-reactor-dispatch reactor 1 #'ignore #'ignore)
+      (gen-reactor-dispatch reactor 2 #'ignore (lambda (e) (push e errors)))
+      (should (= 1 (length errors))))))
+
+(declare-function gen-pool-map "gen")
+
+(ert-deftest sprite-fleet/reactor-end-to-end-with-gen-pool-map ()
+  "End-to-end integration of `sprite-fleet-reactor' with `gen-pool-map'."
+  (skip-unless (locate-library "gen"))
+  (require 'gen)
+  (cl-letf (((symbol-function 'sprite-future-eval)
+             (lambda (target form &rest _)
+               (let ((f (sprite-future--make :target target :state :pending)))
+                 (run-with-timer
+                  0.005 nil
+                  (lambda ()
+                    (sprite-future--settle f :resolved (eval form t))))
+                 f))))
+    (let* ((reactor (sprite-fleet-reactor-create
+                     :targets '("w1" "w2")
+                     :form-builder (lambda (x) `(* ,x 100))))
+           (final-results nil)
+           (done nil))
+      (gen-pool-map
+       nil
+       '(1 2 3 4)
+       :reactor reactor
+       :order 'preserve
+       :on-done (lambda (res)
+                  (setq final-results res)
+                  (setq done t)))
+      (sprite-fleet-test-wait-until done)
+      (should (equal '(100 200 300 400) final-results)))))
+
 (provide 'test-sprite-fleet)
 ;;; test-sprite-fleet.el ends here

@@ -41,6 +41,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'map)
 (require 'seq)
 (require 'generator)
 (require 'sprite)
@@ -490,6 +491,99 @@ VAR bound to its resolved value."
                (lambda (b i) `(,(nth 0 b) (sprite-future-wait (nth ,i ,gfutures))))
                bindings))
        ,@body)))
+
+;;;; gen.el Reactor Integration
+
+(cl-defgeneric gen-reactor-dispatch (reactor item done-cb err-cb)
+  "Dispatch ITEM to REACTOR without blocking.")
+
+(cl-defgeneric gen-reactor-cancel (reactor &optional reason)
+  "Cancel any in-flight work on REACTOR, optionally recording REASON.")
+
+(cl-defgeneric gen-reactor-concurrency (reactor)
+  "Return the maximum number of concurrent items REACTOR can run.")
+
+(cl-defstruct (sprite-fleet-reactor
+               (:constructor sprite-fleet-reactor--make)
+               (:copier nil))
+  "A `gen.el' reactor that dispatches work across a pool of sprite daemons."
+  targets            ; list of all target name strings
+  available-targets  ; list of currently idle target name strings
+  active-workers     ; hash-table: target-name -> in-flight sprite-future
+  form-builder       ; function converting an item to a remote Elisp form
+  log)               ; non-nil to log worker dispatches
+
+;;;###autoload
+(cl-defun sprite-fleet-reactor-create (&key fleet-size sprites targets form-builder fn-or-form log)
+  "Create a `sprite-fleet-reactor' for `gen-run-async' or `gen-pool-map'.
+TARGETS or SPRITES specifies the sprite daemons (or target names) to lease.
+When both are nil, acquires up to FLEET-SIZE (default `sprite-max-count')
+sprites via `sprite-get-or-create-fleet'.
+FORM-BUILDER is a function taking ITEM and returning the remote Elisp form.
+FN-OR-FORM is passed to `sprite-fleet--make-item-form' when given.
+LOG, when non-nil, enables logging on `sprite-future-eval'."
+  (let* ((raw-targets (or targets
+                          sprites
+                          (sprite-get-or-create-fleet
+                           (max 1 (or fleet-size sprite-max-count)))))
+         (target-names (seq-map #'sprite--target-name raw-targets))
+         (builder (cond
+                   (form-builder form-builder)
+                   (fn-or-form (lambda (item)
+                                 (sprite-fleet--make-item-form fn-or-form item)))
+                   (t (lambda (item)
+                        (sprite-fleet--make-item-form #'identity item))))))
+    (unless target-names
+      (error "sprite-fleet-reactor-create requires at least one available target"))
+    (sprite-fleet-reactor--make
+     :targets target-names
+     :available-targets (copy-sequence target-names)
+     :active-workers (make-hash-table :test #'equal)
+     :form-builder builder
+     :log log)))
+
+(cl-defmethod gen-reactor-concurrency ((reactor sprite-fleet-reactor))
+  "Return the number of targets managed by REACTOR."
+  (length (sprite-fleet-reactor-targets reactor)))
+
+(cl-defmethod gen-reactor-dispatch ((reactor sprite-fleet-reactor) item done-cb err-cb)
+  "Lease an available target from REACTOR and evaluate ITEM remotely."
+  (let ((target (pop (sprite-fleet-reactor-available-targets reactor))))
+    (if (null target)
+        (funcall err-cb "No available sprite target in reactor pool")
+      (let* ((form (funcall (sprite-fleet-reactor-form-builder reactor) item))
+             (future (condition-case err
+                         (if (sprite-fleet-reactor-log reactor)
+                             (sprite-future-eval target form :log t)
+                           (sprite-future-eval target form))
+                       (error
+                        (let ((f (sprite-future--make :target target :state :pending)))
+                          (sprite-future--settle f :rejected err)
+                          f)))))
+        (setf (map-elt (sprite-fleet-reactor-active-workers reactor) target) future)
+        (sprite-future-then
+         future
+         (lambda (val)
+           (map-delete (sprite-fleet-reactor-active-workers reactor) target)
+           (unless (member target (sprite-fleet-reactor-available-targets reactor))
+             (push target (sprite-fleet-reactor-available-targets reactor)))
+           (funcall done-cb val))
+         (lambda (err)
+           (map-delete (sprite-fleet-reactor-active-workers reactor) target)
+           (unless (member target (sprite-fleet-reactor-available-targets reactor))
+             (push target (sprite-fleet-reactor-available-targets reactor)))
+           (funcall err-cb err)))))))
+
+(cl-defmethod gen-reactor-cancel ((reactor sprite-fleet-reactor) &optional reason)
+  "Cancel all in-flight futures on REACTOR and restore their targets."
+  (let ((workers (sprite-fleet-reactor-active-workers reactor)))
+    (map-do (lambda (target future)
+              (when (sprite-future-p future)
+                (sprite-future-cancel future (or reason :user-cancel)))
+              (unless (member target (sprite-fleet-reactor-available-targets reactor))
+                (push target (sprite-fleet-reactor-available-targets reactor))))
+            workers)
+    (clrhash workers)))
 
 (provide 'sprite-fleet)
 ;;; sprite-fleet.el ends here
