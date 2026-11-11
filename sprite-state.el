@@ -88,7 +88,8 @@ it is next enabled."
 (defvar sprite-state--owned-modes nil)
 
 (defun sprite-state--apply-settings (&optional settings)
-  "Apply SETTINGS (default `sprite-state-settings') and record prior default values."
+  "Apply SETTINGS (default `sprite-state-settings').
+Record prior default values."
   (seq-do (lambda (entry)
             (let ((symbol (car entry))
                   (value (cdr entry)))
