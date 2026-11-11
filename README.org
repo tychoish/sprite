@@ -176,9 +176,15 @@ Below is a complete ~use-package~ configuration block setting useful options wit
 
 ** Instance state and desktop persistence
 
-Opt into instance-scoped paths and locks early, then enable desktop persistence
-at the desired late startup point.  Optional package mappings do not load or
-require those packages; all mappings and desktop support default to off.  See
+Opt into instance-scoped paths and locks early.  Set
+~sprite-state-savehist-enabled~ and ~sprite-state-recentf-enabled~ independently
+before enabling ~sprite-state-global-mode~.  The mode configures paths first,
+starts only inactive persistence modes, and stops only modes it started.  To
+restore desktop later, set ~sprite-state-desktop-enabled~ and ~sprite-state-desktop-deferred~, then call
+~sprite-state-start-desktop~ after enabling the mode.  These controls default
+to off.  Customize ~sprite-state-settings~ (an alist of ~(SYMBOL . VALUE)~ pairs)
+to adjust the global defaults managed while ~sprite-state-global-mode~ is active
+and restored on disable.  See
 [[file:docs/instance-state.org][Instance State and Desktop Persistence]] for examples and lifecycle details.
 
 * Core Concepts and Architecture

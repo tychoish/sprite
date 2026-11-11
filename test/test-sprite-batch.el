@@ -299,9 +299,9 @@
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_p tbl &rest _) (setq table tbl) "Do nothing")))
         (sprite-batch-cancel-menu t)
-        (should (member "Do nothing" table))
-        (should (member "Quit current operation" table))
-        (should-not (member "Cancel ALL active batches" table))))))
+        (should (member "Do nothing" (all-completions "" table)))
+        (should (member "Quit current operation" (all-completions "" table)))
+        (should-not (member "Cancel ALL active batches" (all-completions "" table)))))))
 
 (ert-deftest sprite-batch/cancel-menu-selection ()
   "sprite-batch-cancel-menu displays candidates and dispatches choice."
@@ -491,7 +491,7 @@
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_p tbl &rest _) (setq table tbl) "Do nothing")))
         (sprite-batch-cancel-menu)
-        (should-not (member "Quit current operation" table))))))
+        (should-not (member "Quit current operation" (all-completions "" table)))))))
 
 (ert-deftest sprite-batch/iterator-safe-when-gen-not-loaded ()
   "sprite--make-iterator and sprite-run-batch do not fail when gen is unrequired."

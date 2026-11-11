@@ -45,12 +45,96 @@ Set this before enabling the mode.  Solo instances never restore or save."
   :type 'boolean
   :group 'sprite-state)
 
+(defcustom sprite-state-desktop-deferred nil
+  "When non-nil, start desktop explicitly with `sprite-state-start-desktop'.
+The state mode may then start history before restoring the desktop."
+  :type 'boolean :group 'sprite-state)
+
 (defcustom sprite-state-desktop-idle-interval 120
   "Idle seconds between desktop save checks.
 Set before enabling `sprite-state-global-mode'; changes take effect when
 it is next enabled."
   :type 'natnum
   :group 'sprite-state)
+
+(defcustom sprite-state-savehist-enabled nil
+  "When non-nil, manage Savehist while the state mode is enabled."
+  :type 'boolean :group 'sprite-state)
+
+(defcustom sprite-state-recentf-enabled nil
+  "When non-nil, manage Recentf while the state mode is enabled."
+  :type 'boolean :group 'sprite-state)
+
+(defcustom sprite-state-settings
+  '((recentf-auto-cleanup . never)
+    (recentf-keep file-remote-p file-readable-p)
+    (recentf-max-menu-items . 100)
+    (create-lockfiles . nil))
+  "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-global-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'sprite-state)
+
+(defcustom sprite-state-desktop-settings
+  '((desktop-save . t)
+    (desktop-restore-frames . nil)
+    (desktop-restore-in-current-display . nil)
+    (desktop-restore-eager . t))
+  "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-start-desktop'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'sprite-state)
+
+(defvar sprite-state--saved-settings nil
+  "Saved prior settings recorded by `sprite-state--apply-settings'.")
+(defvar sprite-state--owned-modes nil)
+
+(defun sprite-state--apply-settings (&optional settings)
+  "Apply SETTINGS (default `sprite-state-settings') and record prior default values."
+  (seq-do (lambda (entry)
+            (let ((symbol (car entry))
+                  (value (cdr entry)))
+              (unless (assq symbol sprite-state--saved-settings)
+                (push (cons symbol
+                            (cons (default-boundp symbol)
+                                  (and (default-boundp symbol)
+                                       (default-value symbol))))
+                      sprite-state--saved-settings))
+              (set-default symbol value)))
+          (or settings sprite-state-settings)))
+
+(defun sprite-state--restore-settings ()
+  "Restore settings saved by `sprite-state--apply-settings'."
+  (seq-do (lambda (entry)
+            (let ((symbol (car entry))
+                  (bound (cadr entry))
+                  (value (cddr entry)))
+              (if bound
+                  (set-default symbol value)
+                (makunbound symbol))))
+          sprite-state--saved-settings)
+  (setq sprite-state--saved-settings nil))
+
+(defun sprite-state--stop-owned-modes (&optional save)
+  "Stop owned persistence modes, optionally SAVE history first.
+Return the first error after attempting every cleanup operation."
+  (let (failure)
+    (when (and save (memq 'savehist-mode sprite-state--owned-modes)
+               (bound-and-true-p savehist-mode))
+      (condition-case err (savehist-save)
+        (error (setq failure err))))
+    (seq-do (lambda (mode)
+              (condition-case err (funcall mode -1)
+                (error (unless failure (setq failure err)))))
+            sprite-state--owned-modes)
+    (setq sprite-state--owned-modes nil)
+    failure))
+
+(defun sprite-state--start-mode (feature mode)
+  "Load FEATURE and enable MODE if it is not already active."
+  (require feature)
+  (unless (symbol-value mode)
+    ;; Record ownership first so partial startup can be rolled back.
+    (push mode sprite-state--owned-modes)
+    (funcall mode 1)))
 
 (defvar sprite-state--desktop-timer nil)
 (defvar sprite-state--last-save-time nil)
@@ -61,13 +145,7 @@ it is next enabled."
 (defvar auto-save-file-name-transforms)
 (defvar backup-directory-alist)
 (defvar desktop-base-file-name)
-(defvar desktop-base-lock-name)
-(defvar desktop-path)
-(defvar desktop-save)
-(defvar desktop-restore-frames)
-(defvar desktop-restore-in-current-display)
-(defvar desktop-restore-eager)
-(defvar desktop-load-locked-desktop)
+(declare-function savehist-save "savehist" (&optional auto-save))
 (declare-function desktop-read "desktop" (dirname))
 (declare-function desktop-save "desktop" (dirname &optional release))
 
@@ -113,6 +191,39 @@ Call before consumers initialize.  This does not load optional packages."
           sprite-state--last-save-time (current-time))))
 
 ;;;###autoload
+(defun sprite-state-start-desktop ()
+  "Start desktop persistence after the state mode is enabled.
+This may be called later in startup after setting
+`sprite-state-desktop-enabled'; repeated calls do not add timers."
+  (when (and sprite-state-global-mode sprite-state-desktop-enabled
+             (not sprite-state--desktop-timer)
+             (not (equal (sprite-instance-name) "solo")))
+    (require 'desktop)
+    (setq sprite-state--desktop-directory
+          (file-name-directory (sprite-state-path "desktop.el")))
+    (make-directory sprite-state--desktop-directory t)
+    (sprite-state--apply-settings
+     (append sprite-state-desktop-settings
+             `((desktop-base-file-name . ,(sprite-state-file-prefix "desktop.el"))
+               (desktop-base-lock-name . ,(sprite-state-file-prefix
+                                           (format "desktop-%d.lock" (emacs-pid))))
+               (desktop-path . ,(list sprite-state--desktop-directory
+                                      user-emacs-directory
+                                      (expand-file-name "~/")))
+               (desktop-load-locked-desktop . ,(and (daemonp) t)))))
+    (setq sprite-state--last-save-time (current-time))
+    (let ((file (expand-file-name desktop-base-file-name
+                                  sprite-state--desktop-directory)))
+      (when (and (file-exists-p file)
+                 (not (equal file sprite-state--restored-file)))
+        (unless (eq t (desktop-read sprite-state--desktop-directory))
+          (error "Unable to read desktop in %s" sprite-state--desktop-directory))
+        (setq sprite-state--restored-file file)))
+    (setq sprite-state--desktop-timer
+          (run-with-idle-timer sprite-state-desktop-idle-interval t
+                               #'sprite-state--desktop-save))))
+
+;;;###autoload
 (define-minor-mode sprite-state-global-mode
   "Manage the opt-in state lifecycle for this instance.
 When `sprite-state-desktop-enabled' is non-nil, named instances restore
@@ -125,42 +236,31 @@ independent of `sprite-mode'."
   :group 'sprite-state
   (cond
    ((not sprite-state-global-mode)
-    (when sprite-state--desktop-timer
-      (cancel-timer sprite-state--desktop-timer)
-      (setq sprite-state--desktop-timer nil))
-    (setq sprite-state--active nil))
+    (let ((failure (sprite-state--stop-owned-modes t)))
+      (when sprite-state--desktop-timer
+        (cancel-timer sprite-state--desktop-timer)
+        (setq sprite-state--desktop-timer nil))
+      (sprite-state--restore-settings)
+      (setq sprite-state--active nil)
+      (when failure (signal (car failure) (cdr failure)))))
    ((not sprite-state--active)
     (condition-case err
         (progn
-          (when (and sprite-state-desktop-enabled
-                     (not (equal (sprite-instance-name) "solo")))
-            (require 'desktop)
-            (setq sprite-state--desktop-directory
-                  (file-name-directory (sprite-state-path "desktop.el")))
-            (make-directory sprite-state--desktop-directory t)
-            (setq desktop-base-file-name (sprite-state-file-prefix "desktop.el")
-                  desktop-base-lock-name (sprite-state-file-prefix
-                                          (format "desktop-%d.lock" (emacs-pid)))
-                  desktop-path (list sprite-state--desktop-directory
-                                     user-emacs-directory (expand-file-name "~/"))
-                  desktop-save t
-                  desktop-restore-frames nil
-                  desktop-restore-in-current-display nil
-                  desktop-restore-eager t
-                  desktop-load-locked-desktop (and (daemonp) t)
-                  sprite-state--last-save-time (current-time))
-            (let ((file (expand-file-name desktop-base-file-name
-                                          sprite-state--desktop-directory)))
-              (when (and (file-exists-p file)
-                         (not (equal file sprite-state--restored-file)))
-                (unless (eq t (desktop-read sprite-state--desktop-directory))
-                  (error "Unable to read desktop in %s" sprite-state--desktop-directory))
-                (setq sprite-state--restored-file file)))
-            (setq sprite-state--desktop-timer
-                  (run-with-idle-timer sprite-state-desktop-idle-interval t
-                                       #'sprite-state--desktop-save)))
+          (sprite-state-configure)
+          (sprite-state--apply-settings)
+          (when sprite-state-savehist-enabled
+            (sprite-state--start-mode 'savehist 'savehist-mode))
+          (when sprite-state-recentf-enabled
+            (sprite-state--start-mode 'recentf 'recentf-mode))
+          (unless sprite-state-desktop-deferred
+            (sprite-state-start-desktop))
           (setq sprite-state--active t))
-      (error (setq sprite-state-global-mode nil)
+      (error (sprite-state--stop-owned-modes)
+             (when sprite-state--desktop-timer
+               (cancel-timer sprite-state--desktop-timer)
+               (setq sprite-state--desktop-timer nil))
+             (sprite-state--restore-settings)
+             (setq sprite-state-global-mode nil)
              (signal (car err) (cdr err)))))))
 
 (provide 'sprite-state)
