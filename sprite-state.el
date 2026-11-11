@@ -69,6 +69,7 @@ it is next enabled."
   '((recentf-auto-cleanup . never)
     (recentf-keep file-remote-p file-readable-p)
     (recentf-max-menu-items . 100)
+    (bookmark-save-flag . 1)
     (create-lockfiles . nil))
   "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-global-mode'."
   :type '(alist :key-type symbol :value-type sexp)
