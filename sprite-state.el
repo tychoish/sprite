@@ -86,6 +86,7 @@ it is next enabled."
 (defvar sprite-state--saved-settings nil
   "Saved prior settings recorded by `sprite-state--apply-settings'.")
 (defvar sprite-state--owned-modes nil)
+(defvar sprite-state-global-mode)
 
 (defun sprite-state--apply-settings (&optional settings)
   "Apply SETTINGS (default `sprite-state-settings').
