@@ -253,7 +253,8 @@ independent of `sprite-mode'."
           (sprite-state--apply-settings)
           (when sprite-state-savehist-enabled
             (sprite-state--start-mode 'savehist 'savehist-mode))
-          (when sprite-state-recentf-enabled
+          (let ((inhibit-message t)
+                (message-log-max nil))
             (sprite-state--start-mode 'recentf 'recentf-mode))
           (unless sprite-state-desktop-deferred
             (sprite-state-start-desktop))
