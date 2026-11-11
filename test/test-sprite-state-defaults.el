@@ -167,5 +167,63 @@
       (sprite-state--restore-settings)
       (delete-directory dir t))))
 
+(defvar sprite-state-test-hook-a nil)
+(defvar sprite-state-test-hook-b nil)
+
+(ert-deftest sprite-state-modes-and-hooks-lifecycle ()
+  (should-not (eval (car (get 'sprite-state-auto-mode-alist 'standard-value))))
+  (should-not (eval (car (get 'sprite-state-mode-hooks 'standard-value))))
+  (let* ((auto-mode-alist '(("\\.txt\\'" . text-mode)))
+         (sprite-state-test-hook-a '(preexisting-fn))
+         (sprite-state-test-hook-b nil)
+         (sprite-state-global-mode nil)
+         (sprite-state-auto-mode-alist '(("\\.md\\'" . text-mode)))
+         (sprite-state-mode-hooks '((sprite-state-test-hook-a . preexisting-fn)))
+         (sprite-state--owned-hooks nil))
+    (sprite-state-register-auto-modes '(("\\.txt\\'" . markdown-mode)
+                                        ("\\.md\\'" . markdown-mode)))
+    (sprite-state-register-mode-hooks '((sprite-state-test-hook-a . added-fn-a)
+                                        (sprite-state-test-hook-b . added-fn-b)))
+    (should (eq (cdr (assoc "\\.md\\'" sprite-state-auto-mode-alist)) 'markdown-mode))
+    (should (equal (cdr (assq 'sprite-state-test-hook-a sprite-state-mode-hooks))
+                   '(preexisting-fn added-fn-a)))
+    (should (eq (cdr (assq 'sprite-state-test-hook-b sprite-state-mode-hooks))
+                'added-fn-b))
+    (sprite-state-modes-initialize)
+    (should (eq (cdr (assoc "\\.txt\\'" auto-mode-alist)) 'markdown-mode))
+    (sprite-state--add-hooks)
+    (should (memq 'preexisting-fn sprite-state-test-hook-a))
+    (should (memq 'added-fn-a sprite-state-test-hook-a))
+    (should (equal sprite-state-test-hook-b '(added-fn-b)))
+    (sprite-state--remove-hooks)
+    (should (equal sprite-state-test-hook-a '(preexisting-fn)))
+    (should-not sprite-state-test-hook-b)))
+
+(ert-deftest sprite-state-merge-preserves-unrelated-duplicates ()
+  "Preserve duplicate existing patterns unless explicitly replaced."
+  (should (equal (sprite-state-modes-merge-alist
+                  '(("other" . first) ("other" . second) ("new" . old))
+                  '(("new" . replacement)))
+                 '(("new" . replacement) ("other" . first) ("other" . second)))))
+
+(ert-deftest sprite-state-register-while-active ()
+  "Apply registrations immediately and preserve hooks owned by others."
+  (let ((sprite-state-global-mode t)
+        (sprite-state-auto-mode-alist nil)
+        (sprite-state-mode-hooks nil)
+        (auto-mode-alist nil)
+        (sprite-state-test-hook-a '(preexisting-fn))
+        (sprite-state--owned-hooks nil))
+    (unwind-protect
+        (progn
+          (sprite-state-register-auto-modes '(("active" . text-mode)))
+          (sprite-state-register-mode-hooks
+           '((sprite-state-test-hook-a . (preexisting-fn added-fn-a))))
+          (should (equal (cdr (assoc "active" auto-mode-alist)) 'text-mode))
+          (should (memq 'added-fn-a sprite-state-test-hook-a))
+          (sprite-state--remove-hooks)
+          (should (equal sprite-state-test-hook-a '(preexisting-fn))))
+      (sprite-state--remove-hooks))))
+
 (provide 'test-sprite-state-defaults)
 ;;; test-sprite-state-defaults.el ends here
