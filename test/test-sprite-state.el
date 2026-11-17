@@ -14,7 +14,10 @@
   "Run BODY with an isolated state directory and identity."
   (declare (indent 0) (debug t))
   `(let* ((noninteractive nil)
-          (user-emacs-directory (make-temp-file "sprite-state-test-" t))
+          (user-emacs-directory (file-name-as-directory (make-temp-file "sprite-state-test-" t)))
+          (default-directory user-emacs-directory)
+          (savehist-file (expand-file-name "history" user-emacs-directory))
+          (recentf-save-file (expand-file-name "recentf" user-emacs-directory))
           (sprite-instance-id "work")
           (sprite--system-name-cached "host")
           (user-login-name "tester")
@@ -22,6 +25,8 @@
           (sprite-state-locks-enabled nil)
           (sprite-state-auto-save-enabled nil)
           (sprite-state-desktop-enabled nil)
+          (sprite-state-desktop-deferred nil)
+          (savehist-mode t)
           (sprite-state-global-mode nil)
           (sprite-state--desktop-timer nil)
           (sprite-state--last-save-time nil)
@@ -43,6 +48,12 @@
        (when sprite-state--active
          (sprite-state-global-mode -1))
        (delete-directory user-emacs-directory t))))
+
+(ert-deftest sprite-state/fixture-isolates-state-files ()
+  (sprite-state-test/with-directory
+    (should (equal default-directory user-emacs-directory))
+    (should (file-in-directory-p savehist-file user-emacs-directory))
+    (should (file-in-directory-p recentf-save-file user-emacs-directory))))
 
 (ert-deftest sprite-state/mappings-opt-in-and-later-declaration ()
   (sprite-state-test/with-directory
@@ -306,6 +317,54 @@
         (should (= #o700 (file-modes path)))
         (should (equal auto-save-file-name-transforms `((".*" ,path t))))
         (should (member (cons "." path) backup-directory-alist))))))
+
+(ert-deftest sprite-state/always-starts-savehist ()
+  (sprite-state-test/with-directory
+    (let (started)
+      (cl-letf (((symbol-function 'sprite-state--start-mode)
+                 (lambda (feature _) (push feature started))))
+        (sprite-state-global-mode 1)
+        (should (memq 'savehist started))))))
+(ert-deftest sprite-state/desktop-exclusions-merge-and-restore ()
+  (sprite-state-test/with-directory
+    (let ((sprite-state-desktop-enabled t)
+          (desktop-modes-not-to-save '(existing-mode))
+          (sprite-state-desktop-modes-not-to-save '(dired-mode org-mode)))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest _) 'fake-timer))
+                ((symbol-function 'cancel-timer) #'ignore))
+        (sprite-state-global-mode 1)
+        (should (memq 'existing-mode desktop-modes-not-to-save))
+        (should (memq 'dired-mode desktop-modes-not-to-save))
+        (should (memq 'org-mode desktop-modes-not-to-save))
+        (sprite-state-global-mode -1)
+        (should (equal desktop-modes-not-to-save '(existing-mode)))))))
+(ert-deftest sprite-state/desktop-regex-exclusions-merge-and-restore ()
+  "Preserve existing exclusions while adding managed patterns."
+  (sprite-state-test/with-directory
+    (let ((sprite-state-desktop-enabled t)
+          (desktop-buffers-not-to-save "^existing-buffer$")
+          (desktop-files-not-to-save "^/existing/")
+          (sprite-state-desktop-buffers-not-to-save "^temporary$")
+          (sprite-state-desktop-files-not-to-save "^/managed/"))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest _) 'fake-timer))
+                ((symbol-function 'cancel-timer) #'ignore))
+        (sprite-state-global-mode 1)
+        (should (string-match-p desktop-buffers-not-to-save "existing-buffer"))
+        (should (string-match-p desktop-buffers-not-to-save "temporary"))
+        (should (string-match-p desktop-files-not-to-save "/existing/file"))
+        (should (string-match-p desktop-files-not-to-save "/managed/file"))
+        (should-not (string-match-p desktop-files-not-to-save "/ordinary/file"))
+        (sprite-state-global-mode -1)
+        (should (equal desktop-buffers-not-to-save "^existing-buffer$"))
+        (should (equal desktop-files-not-to-save "^/existing/"))))))
+
+(ert-deftest sprite-state/desktop-default-exclusions ()
+  "Default patterns cover temporary buffers, remote files, and dependency paths."
+  (should (string-match-p sprite-state-desktop-buffers-not-to-save " *temporary*"))
+  (should (string-match-p sprite-state-desktop-files-not-to-save "/ssh:example:/tmp/file"))
+  (should (string-match-p sprite-state-desktop-files-not-to-save "/usr/lib/go/src/file.go"))
+  (should (string-match-p sprite-state-desktop-files-not-to-save "/home/user/go/pkg/mod/pkg/file.go"))
+  (should-not (string-match-p sprite-state-desktop-files-not-to-save "/home/user/src/file.go")))
 
 (provide 'test-sprite-state)
 ;;; test-sprite-state.el ends here
