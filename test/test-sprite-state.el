@@ -6,6 +6,8 @@
 ;;; Code:
 (require 'ert)
 (require 'cl-lib)
+(require 'savehist)
+(require 'recentf)
 (require 'sprite)
 (require 'sprite-state)
 (require 'desktop)

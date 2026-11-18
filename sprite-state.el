@@ -50,6 +50,15 @@ Set this before enabling the mode.  Solo instances never restore or save."
 The state mode may then start history before restoring the desktop."
   :type 'boolean :group 'sprite-state)
 
+(defcustom sprite-state-desktop-restore-style 'eager
+  "Style used to restore desktop sessions.
+When `eager', restore all buffers synchronously using `desktop-read'.
+When `staged', restore eager set first and stage the rest asynchronously
+with `sprite-desktop-read'."
+  :type '(choice (const :tag "Eager (synchronous)" eager)
+                 (const :tag "Staged (asynchronous)" staged))
+  :group 'sprite-state)
+
 (defcustom sprite-state-desktop-idle-interval 120
   "Idle seconds between desktop save checks.
 Set before enabling `sprite-state-global-mode'; changes take effect when
@@ -251,6 +260,8 @@ Return the first error after attempting every cleanup operation."
 (declare-function savehist-save "savehist" (&optional auto-save))
 (declare-function desktop-read "desktop" (dirname))
 (declare-function desktop-save "desktop" (dirname &optional release))
+(declare-function sprite-desktop-read "sprite-desktop" (&optional dirname))
+(declare-function sprite-desktop-pause "sprite-desktop" ())
 
 ;;;###autoload
 (defun sprite-state-configure ()
@@ -335,8 +346,11 @@ This may be called later in startup after setting
                                   sprite-state--desktop-directory)))
       (when (and (file-exists-p file)
                  (not (equal file sprite-state--restored-file)))
-        (unless (eq t (desktop-read sprite-state--desktop-directory))
-          (error "Unable to read desktop in %s" sprite-state--desktop-directory))
+        (let ((read-fn (if (eq sprite-state-desktop-restore-style 'staged)
+                           (progn (require 'sprite-desktop) #'sprite-desktop-read)
+                         #'desktop-read)))
+          (unless (eq t (funcall read-fn sprite-state--desktop-directory))
+            (error "Unable to read desktop in %s" sprite-state--desktop-directory)))
         (setq sprite-state--restored-file file)))
     (setq sprite-state--desktop-timer
           (run-with-idle-timer sprite-state-desktop-idle-interval t
@@ -356,6 +370,8 @@ independent of `sprite-mode'."
   (cond
    ((not sprite-state-global-mode)
     (let ((failure (sprite-state--stop-owned-modes t)))
+      (when (fboundp 'sprite-desktop-pause)
+        (sprite-desktop-pause))
       (when sprite-state--desktop-timer
         (cancel-timer sprite-state--desktop-timer)
         (setq sprite-state--desktop-timer nil))

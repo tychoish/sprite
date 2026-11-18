@@ -224,5 +224,28 @@
           (should (equal sprite-state-test-hook-a '(preexisting-fn))))
       (sprite-state--remove-hooks))))
 
+(ert-deftest sprite-state-staged-restore-dispatch ()
+  "Confirm `sprite-state-desktop-restore-style' dispatches to `sprite-desktop-read'."
+  (require 'sprite-desktop)
+  (let ((sprite-state-desktop-restore-style 'staged)
+        (sprite-state-global-mode t)
+        (sprite-state-desktop-enabled t)
+        (sprite-state--desktop-timer nil)
+        (called-reader nil))
+    (cl-letf (((symbol-function 'sprite-instance-name) (lambda () "work"))
+              ((symbol-function 'desktop-read) (lambda (&rest _) (setq called-reader 'eager) t))
+              ((symbol-function 'sprite-desktop-read) (lambda (&rest _) (setq called-reader 'staged) t))
+              ((symbol-function 'run-with-idle-timer) (lambda (&rest _) 'fake-timer)))
+      (let* ((temp-dir (make-temp-file "staged-test-" t))
+             (desktop-file (expand-file-name "desktop.el" temp-dir)))
+        (unwind-protect
+            (progn
+              (write-region "" nil desktop-file)
+              (cl-letf (((symbol-function 'sprite-state-path) (lambda (_) desktop-file))
+                        ((symbol-function 'sprite-state-file-prefix) (lambda (_) "desktop.el")))
+                (sprite-state-start-desktop)
+                (should (eq called-reader 'staged))))
+          (delete-directory temp-dir t))))))
+
 (provide 'test-sprite-state-defaults)
 ;;; test-sprite-state-defaults.el ends here
