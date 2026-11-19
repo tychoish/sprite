@@ -247,5 +247,21 @@
                 (should (eq called-reader 'staged))))
           (delete-directory temp-dir t))))))
 
+(ert-deftest sprite-state-agent-shell-path-helper ()
+  "Confirm `sprite-state-agent-shell-state-path' joins with agent-shell state dir."
+  (cl-letf (((symbol-function 'sprite-state-path)
+             (lambda (name) (format "/state/%s" name))))
+    (should (equal (sprite-state-agent-shell-state-path "transcripts")
+                   "/state/agent-shell/transcripts"))
+    (should (equal (sprite-state-agent-shell-path "transcripts")
+                   "/state/agent-shell/transcripts"))))
+
+(ert-deftest sprite-state-default-settings-include-savehist-and-agent-shell ()
+  "Verify default `sprite-state-settings' include savehist and agent-shell entries."
+  (should (equal (cdr (assq 'savehist-coding-system sprite-state-settings))
+                 'utf-8-emacs))
+  (should (eq (cdr (assq 'agent-shell-dot-subdir-function sprite-state-settings))
+              'sprite-state-agent-shell-state-path)))
+
 (provide 'test-sprite-state-defaults)
 ;;; test-sprite-state-defaults.el ends here

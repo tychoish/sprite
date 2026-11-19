@@ -82,7 +82,9 @@ it is next enabled."
     (auto-revert-avoid-polling . t)
     (auto-revert-interval . 60)
     (backup-by-copying . t)
-    (delete-old-versions . t))
+    (delete-old-versions . t)
+    (savehist-coding-system . utf-8-emacs)
+    (agent-shell-dot-subdir-function . sprite-state-agent-shell-state-path))
   "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-global-mode'."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'sprite-state)
@@ -301,6 +303,13 @@ Call before consumers initialize.  This does not load optional packages."
     (unless (file-exists-p path)
       (make-directory path t))
     (set-file-modes path #o700)))
+
+;;;###autoload
+(defun sprite-state-agent-shell-state-path (path)
+  "Return agent-shell state directory for PATH in this sprite instance."
+  (file-name-concat (sprite-state-path "agent-shell") path))
+
+(defalias 'sprite-state-agent-shell-path #'sprite-state-agent-shell-state-path)
 
 (defun sprite-state--desktop-save ()
   "Save the desktop probabilistically, or after 150 seconds."
