@@ -70,6 +70,8 @@ it is next enabled."
   "When non-nil, manage Recentf while the state mode is enabled."
   :type 'boolean :group 'sprite-state)
 
+(defvaralias 'sprite-state-managed-settings 'sprite-state-settings)
+
 (defcustom sprite-state-settings
   '((recentf-auto-cleanup . never)
     (recentf-keep file-remote-p file-readable-p)
@@ -84,8 +86,6 @@ it is next enabled."
   "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-global-mode'."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'sprite-state)
-
-(defvaralias 'sprite-state-managed-settings 'sprite-state-settings)
 
 (defcustom sprite-state-desktop-settings
   '((desktop-save . t)
