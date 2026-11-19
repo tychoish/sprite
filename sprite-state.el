@@ -75,10 +75,17 @@ it is next enabled."
     (recentf-keep file-remote-p file-readable-p)
     (recentf-max-menu-items . 100)
     (bookmark-save-flag . 1)
-    (create-lockfiles . nil))
+    (create-lockfiles . nil)
+    (auto-revert-verbose . nil)
+    (auto-revert-avoid-polling . t)
+    (auto-revert-interval . 60)
+    (backup-by-copying . t)
+    (delete-old-versions . t))
   "Alist of `(SYMBOL . VALUE)' settings managed by `sprite-state-global-mode'."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'sprite-state)
+
+(defvaralias 'sprite-state-managed-settings 'sprite-state-settings)
 
 (defcustom sprite-state-desktop-settings
   '((desktop-save . t)
