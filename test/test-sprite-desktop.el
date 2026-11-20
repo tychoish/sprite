@@ -36,6 +36,21 @@
          (funcall sprite-desktop--cancel-fn)
          (setq sprite-desktop--cancel-fn nil)))))
 
+(ert-deftest sprite-desktop/record-visits-trims-history ()
+  "Discard old visits and cap retained history at 2000 entries."
+  (let* ((now (float-time))
+         (sprite-desktop-cold-window 100)
+         (sprite-desktop-visit-history
+          (cons (cons "old" (- now 500))
+                (seq-map (lambda (n) (cons (number-to-string n) now))
+                         (number-sequence 1 2001)))))
+    (cl-letf (((symbol-function 'buffer-list) (lambda (&rest _) nil)))
+      (sprite-desktop--record-visits))
+    (should (= (length sprite-desktop-visit-history) 2000))
+    (should-not (assoc "old" sprite-desktop-visit-history))
+    (should (assoc "1" sprite-desktop-visit-history))
+    (should-not (assoc "2001" sprite-desktop-visit-history))))
+
 (ert-deftest sprite-desktop/classifier-rules ()
   "Hot, light, heavy, cold assigned per the classification rules."
   (sprite-desktop-test/with-env

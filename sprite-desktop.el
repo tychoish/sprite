@@ -144,9 +144,10 @@
               (float-time display-time))))
     ;; Trim entries older than 4 * cold window or exceeding 2000
     (let* ((cutoff (- now (* 4 sprite-desktop-cold-window)))
-           (trimmed (thread-last sprite-desktop-visit-history
-                      (seq-filter (lambda (entry) (>= (cdr entry) cutoff)))
-                      (seq-take 2000))))
+           (trimmed (seq-take
+                     (seq-filter (lambda (entry) (>= (cdr entry) cutoff))
+                                 sprite-desktop-visit-history)
+                     2000)))
       (setq sprite-desktop-visit-history trimmed))))
 
 (add-hook 'desktop-save-hook #'sprite-desktop--record-visits)
