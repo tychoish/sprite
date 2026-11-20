@@ -400,7 +400,12 @@ overrides for :file, :mode, or :project."
   "Start the batch drain loop using `sprite-run-batch'."
   (when (and (not sprite-desktop--paused)
              (sprite-desktop--has-pending-p)
-             (null sprite-desktop--cancel-fn))
+             (or (null sprite-desktop--cancel-fn)
+                 ;; A quit/cancel leaves a stale cancel-fn behind.
+                 (not (seq-some
+                       (lambda (h) (eq (sprite-batch-handle-cancel-fn h)
+                                       sprite-desktop--cancel-fn))
+                       (sprite-batch-active-handles)))))
     (setq sprite-desktop--cancel-fn
           (sprite-run-batch
            :operations (sprite-desktop--drain-generator)
