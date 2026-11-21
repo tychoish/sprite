@@ -14,6 +14,26 @@
 (require 'generator)
 (require 'sprite-batch)
 
+(ert-deftest sprite-batch/timing-includes-autoload ()
+  "A slow autoload is included in the operation timing."
+  (let ((file (make-temp-file "sprite-test-autoload-" nil ".el"))
+        (sprite-slow-op-reporting t)
+        (sprite-slow-op-threshold 0.05)
+        (message-log-max t)
+        (inhibit-message t))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "(sleep-for 0.2)\n(defun sprite-test--timed-autoload () nil)\n"))
+          (autoload 'sprite-test--timed-autoload file)
+          (let ((start (with-current-buffer (get-buffer-create "*Messages*") (point-max))))
+            (sprite-batch--execute-operation 'sprite-test--timed-autoload)
+            (with-current-buffer "*Messages*"
+              (should (string-match-p "sprite-test--timed-autoload:"
+                                      (buffer-substring-no-properties start (point-max)))))))
+      (fmakunbound 'sprite-test--timed-autoload)
+      (delete-file file))))
+
 (ert-deftest sprite-batch/run-args-batch-sync ()
   "sprite-run-batch executes operations with :args in batch mode."
   (let ((results nil)

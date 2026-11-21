@@ -85,9 +85,9 @@ log operation duration with LOG-PREFIX if it exceeds `sprite-slow-op-threshold'.
       (sprite-batch--with-context frame buffer
         (when (and (consp fn) (eq (car fn) :mode))
           (setq fn (sprite-batch--startup-mode fn)))
-        (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
-          (autoload-do-load (symbol-function fn) fn))
         (with-sprite-slow-op-timer (format "%s %s" (or log-prefix "[run]") fn)
+          (when (and (symbolp fn) (fboundp fn) (autoloadp (symbol-function fn)))
+            (autoload-do-load (symbol-function fn) fn))
           (if (equal (cdr (func-arity fn)) 0)
               (funcall fn)
             (apply fn (ensure-list args)))))
