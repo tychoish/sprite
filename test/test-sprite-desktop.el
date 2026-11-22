@@ -12,6 +12,17 @@
 (require 'desktop)
 (require 'sprite-desktop)
 
+(ert-deftest sprite-desktop/registers-savehist-history ()
+  "Register both histories idempotently when Savehist starts."
+  (let ((savehist-additional-variables nil))
+    (run-hooks 'savehist-mode-hook)
+    (sprite-desktop--register-history)
+    (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-visit-history))
+                            savehist-additional-variables)))
+    (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-cost-history))
+                            savehist-additional-variables)))))
+
+
 (defvar eglox-activate-queue nil)
 
 (defmacro sprite-desktop-test/with-env (&rest body)

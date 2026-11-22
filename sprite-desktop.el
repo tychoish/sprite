@@ -119,9 +119,14 @@
 
 ;;; Persistence & History
 
-(with-eval-after-load 'savehist
-  (add-to-list 'savehist-additional-variables 'sprite-desktop-visit-history)
-  (add-to-list 'savehist-additional-variables 'sprite-desktop-cost-history))
+(defun sprite-desktop--register-history ()
+  "Register desktop histories once Savehist variables are available."
+  (when (boundp 'savehist-additional-variables)
+    (add-to-list 'savehist-additional-variables 'sprite-desktop-visit-history)
+    (add-to-list 'savehist-additional-variables 'sprite-desktop-cost-history)))
+
+(add-hook 'savehist-mode-hook #'sprite-desktop--register-history)
+(sprite-desktop--register-history)
 
 (defun sprite-desktop--record-cost (mode ms)
   "Update average materialization MS for MODE."
