@@ -125,8 +125,6 @@
     (add-to-list 'savehist-additional-variables 'sprite-desktop-visit-history)
     (add-to-list 'savehist-additional-variables 'sprite-desktop-cost-history)))
 
-(add-hook 'savehist-mode-hook #'sprite-desktop--register-history)
-(sprite-desktop--register-history)
 
 (defun sprite-desktop--record-cost (mode ms)
   "Update average materialization MS for MODE."
@@ -155,7 +153,6 @@
                      2000)))
       (setq sprite-desktop-visit-history trimmed))))
 
-(add-hook 'desktop-save-hook #'sprite-desktop--record-visits)
 
 ;;; Classification and Scoring
 
@@ -514,7 +511,6 @@ Returns immediately.  Opening any listed file later awaits it."
             (insert (format "(sprite-desktop--restore-entry '%S)\n"
                             (sprite-desktop-entry-args entry)))))))))
 
-(add-hook 'desktop-save-hook #'sprite-desktop--save-pending)
 
 ;;; Collector & Entry Staging
 
@@ -549,9 +545,23 @@ Returns immediately.  Opening any listed file later awaits it."
   (sprite-desktop--log)
   (sprite-desktop--start-drain))
 
+(defun sprite-desktop--enable-hooks ()
+  "Install persistence hooks for staged desktop restoration."
+  (add-hook 'savehist-mode-hook #'sprite-desktop--register-history)
+  (add-hook 'desktop-save-hook #'sprite-desktop--record-visits)
+  (add-hook 'desktop-save-hook #'sprite-desktop--save-pending)
+  (sprite-desktop--register-history))
+
+(defun sprite-desktop--disable-hooks ()
+  "Remove hooks installed for staged desktop restoration."
+  (remove-hook 'savehist-mode-hook #'sprite-desktop--register-history)
+  (remove-hook 'desktop-save-hook #'sprite-desktop--record-visits)
+  (remove-hook 'desktop-save-hook #'sprite-desktop--save-pending))
+
 ;;;###autoload
 (defun sprite-desktop-read (&optional dirname)
   "Read and stage desktop file in DIRNAME without blocking input."
+  (sprite-desktop--enable-hooks)
   (let ((entries nil)
         (sprite-desktop--collecting t))
     (cl-letf (((symbol-function 'desktop-create-buffer)

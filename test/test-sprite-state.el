@@ -290,6 +290,41 @@
         (should-not sprite-state--restored-file)
         (should-not sprite-state-global-mode)))))
 
+(ert-deftest sprite-state/staged-desktop-installs-hooks-without-saved-file ()
+  "A new staged desktop installs persistence hooks and removes them on stop."
+  (require 'sprite-desktop)
+  (sprite-state-test/with-directory
+    (let ((sprite-state-desktop-enabled t)
+          (sprite-state-desktop-restore-style 'staged)
+          (desktop-save-hook nil)
+          (savehist-mode-hook nil)
+          (savehist-additional-variables nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest _) 'fake-timer))
+                ((symbol-function 'cancel-timer) #'ignore))
+        (sprite-state-global-mode 1)
+        (should (memq #'sprite-desktop--save-pending desktop-save-hook))
+        (should (memq 'sprite-desktop-visit-history savehist-additional-variables))
+        (sprite-state-global-mode -1)
+        (should-not (memq #'sprite-desktop--save-pending desktop-save-hook))
+        (sprite-state-global-mode 1)
+        (should (memq #'sprite-desktop--save-pending desktop-save-hook))
+        (sprite-state-global-mode -1)))))
+
+(ert-deftest sprite-state/staged-desktop-cleans-hooks-after-restore-failure ()
+  "A failed staged restore leaves no desktop persistence hooks installed."
+  (require 'sprite-desktop)
+  (sprite-state-test/with-directory
+    (let ((sprite-state-desktop-enabled t)
+          (sprite-state-desktop-restore-style 'staged)
+          (desktop-save-hook nil)
+          (savehist-mode-hook nil))
+      (make-directory (file-name-directory (sprite-state-path "desktop.el")) t)
+      (write-region "" nil (sprite-state-path "desktop.el") nil 'silent)
+      (cl-letf (((symbol-function 'sprite-desktop-read) (lambda (&rest _) nil)))
+        (should-error (sprite-state-global-mode 1))
+        (should-not (memq #'sprite-desktop--save-pending desktop-save-hook))
+        (should-not (memq #'sprite-desktop--register-history savehist-mode-hook))))))
+
 (ert-deftest sprite-state/saved-new-desktop-is-not-restored-on-reenable ()
   (sprite-state-test/with-directory
     (let ((sprite-state-desktop-enabled t) (reads 0))

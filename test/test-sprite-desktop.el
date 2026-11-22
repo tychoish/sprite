@@ -13,15 +13,24 @@
 (require 'sprite-desktop)
 
 (ert-deftest sprite-desktop/registers-savehist-history ()
-  "Register both histories idempotently when Savehist starts."
-  (let ((savehist-additional-variables nil))
-    (run-hooks 'savehist-mode-hook)
-    (sprite-desktop--register-history)
-    (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-visit-history))
-                            savehist-additional-variables)))
-    (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-cost-history))
-                            savehist-additional-variables)))))
-
+  "Desktop lifecycle installs and removes hooks and registers history once."
+  (let ((savehist-additional-variables nil)
+        (savehist-mode-hook nil)
+        (desktop-save-hook nil))
+    (unwind-protect
+        (progn
+          (sprite-desktop--enable-hooks)
+          (run-hooks 'savehist-mode-hook)
+          (should (memq #'sprite-desktop--record-visits desktop-save-hook))
+          (should (memq #'sprite-desktop--save-pending desktop-save-hook))
+          (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-visit-history))
+                                  savehist-additional-variables)))
+          (should (= 1 (seq-count (lambda (it) (eq it 'sprite-desktop-cost-history))
+                                  savehist-additional-variables))))
+      (sprite-desktop--disable-hooks))
+    (should-not (memq #'sprite-desktop--register-history savehist-mode-hook))
+    (should-not (memq #'sprite-desktop--record-visits desktop-save-hook))
+    (should-not (memq #'sprite-desktop--save-pending desktop-save-hook))))
 
 (defvar eglox-activate-queue nil)
 

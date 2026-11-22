@@ -271,6 +271,8 @@ Return the first error after attempting every cleanup operation."
 (declare-function desktop-save "desktop" (dirname &optional release))
 (declare-function sprite-desktop-read "sprite-desktop" (&optional dirname))
 (declare-function sprite-desktop-pause "sprite-desktop" ())
+(declare-function sprite-desktop--disable-hooks "sprite-desktop" ())
+(declare-function sprite-desktop--enable-hooks "sprite-desktop" ())
 
 ;;;###autoload
 (defun sprite-state-configure ()
@@ -358,19 +360,29 @@ This may be called later in startup after setting
                                       (expand-file-name "~/")))
                (desktop-load-locked-desktop . ,(and (daemonp) t)))))
     (setq sprite-state--last-save-time (current-time))
-    (let ((file (expand-file-name desktop-base-file-name
-                                  sprite-state--desktop-directory)))
-      (when (and (file-exists-p file)
-                 (not (equal file sprite-state--restored-file)))
-        (let ((read-fn (if (eq sprite-state-desktop-restore-style 'staged)
-                           (progn (require 'sprite-desktop) #'sprite-desktop-read)
-                         #'desktop-read)))
-          (unless (eq t (funcall read-fn sprite-state--desktop-directory))
-            (error "Unable to read desktop in %s" sprite-state--desktop-directory)))
-        (setq sprite-state--restored-file file)))
-    (setq sprite-state--desktop-timer
-          (run-with-idle-timer sprite-state-desktop-idle-interval t
-                               #'sprite-state--desktop-save))))
+    (when (eq sprite-state-desktop-restore-style 'staged)
+      (require 'sprite-desktop)
+      (sprite-desktop--enable-hooks))
+    (condition-case err
+        (progn
+          (let ((file (expand-file-name desktop-base-file-name
+                                        sprite-state--desktop-directory)))
+            (when (and (file-exists-p file)
+                       (not (equal file sprite-state--restored-file)))
+              (let ((read-fn (if (eq sprite-state-desktop-restore-style 'staged)
+                                 #'sprite-desktop-read
+                               #'desktop-read)))
+                (unless (eq t (funcall read-fn sprite-state--desktop-directory))
+                  (error "Unable to read desktop in %s" sprite-state--desktop-directory)))
+              (setq sprite-state--restored-file file)))
+          (setq sprite-state--desktop-timer
+                (run-with-idle-timer sprite-state-desktop-idle-interval t
+                                     #'sprite-state--desktop-save)))
+      (error
+       (when (and (eq sprite-state-desktop-restore-style 'staged)
+                  (fboundp 'sprite-desktop--disable-hooks))
+         (sprite-desktop--disable-hooks))
+       (signal (car err) (cdr err))))))
 
 ;;;###autoload
 (define-minor-mode sprite-state-global-mode
@@ -388,6 +400,8 @@ independent of `sprite-mode'."
     (let ((failure (sprite-state--stop-owned-modes t)))
       (when (fboundp 'sprite-desktop-pause)
         (sprite-desktop-pause))
+      (when (fboundp 'sprite-desktop--disable-hooks)
+        (sprite-desktop--disable-hooks))
       (when sprite-state--desktop-timer
         (cancel-timer sprite-state--desktop-timer)
         (setq sprite-state--desktop-timer nil))
