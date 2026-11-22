@@ -137,6 +137,12 @@ removed when it is disabled."
                 :value-type (choice function (repeat function)))
   :group 'sprite-state)
 
+(defcustom sprite-state-enabled-commands nil
+  "List of command symbols to enable when `sprite-state-global-mode' is enabled.
+When `sprite-state-global-mode' is disabled, these commands are disabled again."
+  :type '(repeat symbol)
+  :group 'sprite-state)
+
 ;;;###autoload
 (defun sprite-state-modes-merge-alist (current new-entries)
   "Merge NEW-ENTRIES into CURRENT alist, overriding existing keys."
@@ -203,6 +209,17 @@ removed when it is disabled."
             (remove-hook (car entry) (cdr entry)))
           sprite-state--owned-hooks)
   (setq sprite-state--owned-hooks nil))
+
+;;;###autoload
+(defun sprite-state-enable-commands (&optional disable)
+  "Enable commands listed in `sprite-state-enabled-commands'.
+When DISABLE is non-nil, disable them instead."
+  (dolist (sym sprite-state-enabled-commands)
+    (put sym 'disabled (and disable t))))
+
+(defun sprite-state-disable-commands ()
+  "Disable commands listed in `sprite-state-enabled-commands'."
+  (sprite-state-enable-commands t))
 
 (defun sprite-state--apply-settings (&optional settings)
   "Apply SETTINGS (default `sprite-state-settings').
@@ -405,6 +422,7 @@ independent of `sprite-mode'."
       (when sprite-state--desktop-timer
         (cancel-timer sprite-state--desktop-timer)
         (setq sprite-state--desktop-timer nil))
+      (sprite-state-disable-commands)
       (sprite-state--remove-hooks)
       (sprite-state--restore-settings)
       (setq sprite-state--active nil)
@@ -416,6 +434,7 @@ independent of `sprite-mode'."
           (sprite-state--apply-settings)
           (sprite-state-modes-initialize)
           (sprite-state--add-hooks)
+          (sprite-state-enable-commands)
           (sprite-state--start-mode 'savehist 'savehist-mode)
           (let ((inhibit-message t)
                 (message-log-max nil))
@@ -427,6 +446,7 @@ independent of `sprite-mode'."
              (when sprite-state--desktop-timer
                (cancel-timer sprite-state--desktop-timer)
                (setq sprite-state--desktop-timer nil))
+             (sprite-state-disable-commands)
              (sprite-state--remove-hooks)
              (sprite-state--restore-settings)
              (setq sprite-state-global-mode nil)

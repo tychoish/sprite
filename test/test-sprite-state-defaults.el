@@ -263,5 +263,26 @@
   (should (eq (cdr (assq 'agent-shell-dot-subdir-function sprite-state-settings))
               'sprite-state-agent-shell-state-path)))
 
+(ert-deftest sprite-state-enabled-commands-lifecycle ()
+  "Verify commands in `sprite-state-enabled-commands' are toggled with mode."
+  (let ((sprite-state-global-mode nil)
+        (sprite-state--active nil)
+        (sprite-state-enabled-commands '(test-sprite-cmd-1 test-sprite-cmd-2))
+        (sprite-state-desktop-enabled nil)
+        (sprite-state-recentf-enabled nil))
+    (put 'test-sprite-cmd-1 'disabled t)
+    (put 'test-sprite-cmd-2 'disabled t)
+    (unwind-protect
+        (progn
+          (sprite-state-global-mode 1)
+          (should-not (get 'test-sprite-cmd-1 'disabled))
+          (should-not (get 'test-sprite-cmd-2 'disabled))
+          (sprite-state-global-mode -1)
+          (should (get 'test-sprite-cmd-1 'disabled))
+          (should (get 'test-sprite-cmd-2 'disabled)))
+      (when sprite-state-global-mode (sprite-state-global-mode -1))
+      (put 'test-sprite-cmd-1 'disabled nil)
+      (put 'test-sprite-cmd-2 'disabled nil))))
+
 (provide 'test-sprite-state-defaults)
 ;;; test-sprite-state-defaults.el ends here
