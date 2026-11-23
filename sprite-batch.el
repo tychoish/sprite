@@ -110,8 +110,9 @@ If FRAME is non-nil and live, BODY executes with FRAME selected."
 (defun sprite-batch--resolve-entry (entry args)
   "Return (LABEL . THUNK) for operation ENTRY, with batch ARGS.
 ENTRY is a function, (:mode MODE), (:op FN [:args ARGS] [:name LABEL]) or
-(:form FORM :name LABEL), where a `:form' entry must be named.  `:op' passes only its own `:args' (none by
-default), never the batch ARGS; `:form' is evaluated with lexical binding."
+(:form FORM :name LABEL), where a `:form' entry must be named.  `:op'
+passes only its own `:args' (none by default), never the batch ARGS;
+`:form' is evaluated with lexical binding."
   (cond
    ((and (consp entry) (eq (car entry) :mode))
     (let ((mode (sprite-batch--startup-mode entry)))
