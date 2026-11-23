@@ -117,6 +117,7 @@ it is next enabled."
   (concat "\\(\\`/[^/:]*:\\|(ftp)\\'\\)\\|"
           "^/usr/lib/go/.*\\|"
           "^/usr/lib/rustlib/.*\\|"
+          "^/usr/\\(local/\\)?share/emacs/.*\\|"
           "^/home.+go/pkg/mod\\|"
           "^/home.+\\.cargo")
   "Regexp matching files excluded from saved desktops, or nil."

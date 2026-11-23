@@ -400,6 +400,8 @@
   (should (string-match-p sprite-state-desktop-buffers-not-to-save " *temporary*"))
   (should (string-match-p sprite-state-desktop-files-not-to-save "/ssh:example:/tmp/file"))
   (should (string-match-p sprite-state-desktop-files-not-to-save "/usr/lib/go/src/file.go"))
+  (should (string-match-p sprite-state-desktop-files-not-to-save "/usr/share/emacs/31.1/lisp/subr.el.gz"))
+  (should (string-match-p sprite-state-desktop-files-not-to-save "/usr/local/share/emacs/31.1/lisp/subr.el.gz"))
   (should (string-match-p sprite-state-desktop-files-not-to-save "/home/user/go/pkg/mod/pkg/file.go"))
   (should-not (string-match-p sprite-state-desktop-files-not-to-save "/home/user/src/file.go")))
 
