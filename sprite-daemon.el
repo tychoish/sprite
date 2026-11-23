@@ -615,9 +615,11 @@ also includes sibling sprite from the same parent."
          sprite-active-threshold)))
 
 (defun sprite--usable-p (s)
-  "Return non-nil if sprite struct S is running and available."
-  (and (sprite--running-p (sprite-name s))
-       (sprite--available-p s)))
+  "Return non-nil if sprite struct S is running and available.
+Check availability first: `sprite--running-p' may ping S, which refreshes
+`last-contact' and would make every pinged sprite look busy."
+  (and (sprite--available-p s)
+       (sprite--running-p (sprite-name s))))
 
 (defun sprite--running-list ()
   "Return the subset of `sprite-resolve-list' that are actually running.

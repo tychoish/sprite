@@ -746,6 +746,17 @@ and `sprite-communication-fallback' is non-nil."
     (let ((sprite-active-threshold 30))
       (should (sprite--available-p s)))))
 
+(ert-deftest sprite/usable-p-ignores-contact-from-its-own-liveness-ping ()
+  "A liveness ping stamps `last-contact'; it must not make the sprite unusable."
+  (let ((s (sprite--make :name "work.0.worker-0" :idx 0 :parent "work"))
+        (sprite-active-threshold 30))
+    (cl-letf (((symbol-function 'sprite--running-p)
+               (lambda (_)
+                 (setf (sprite-last-contact s) (current-time))
+                 t)))
+      (should (sprite--usable-p s))
+      (should-not (sprite--usable-p s)))))
+
 (ert-deftest sprite/get-or-create-errors-at-max ()
   (sprite-test/with-registry
     (cl-letf (((symbol-function 'sprite--running-p) (lambda (_) t))
