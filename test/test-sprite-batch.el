@@ -523,5 +523,72 @@
       (should (equal (car iter) 2))
       (should (equal (funcall (cdr iter)) '(0 . identity))))))
 
+(defvar sprite-test--entry-calls nil)
+
+(defun sprite-test--entry-nilary () (push 'nilary sprite-test--entry-calls))
+(defun sprite-test--entry-args (&rest args) (push (cons 'args args) sprite-test--entry-calls))
+
+(ert-deftest sprite-batch/op-entry-ignores-batch-args ()
+  "`:op' calls with no arguments by default, even when the batch passes some."
+  (let ((sprite-test--entry-calls nil)
+        (noninteractive t))
+    (sprite-run-batch :ops '((:op sprite-test--entry-args)) :args '(1))
+    (should (equal sprite-test--entry-calls '((args))))))
+
+(ert-deftest sprite-batch/op-entry-passes-own-args ()
+  (let ((sprite-test--entry-calls nil)
+        (noninteractive t))
+    (sprite-run-batch :ops '((:op sprite-test--entry-args :args (a b))) :args '(1))
+    (should (equal sprite-test--entry-calls '((args a b))))))
+
+(ert-deftest sprite-batch/op-entry-survives-advice ()
+  "A nilary function whose advice makes it look variadic still runs via `:op'."
+  (let ((sprite-test--entry-calls nil)
+        (noninteractive t))
+    (advice-add 'sprite-test--entry-nilary :after #'ignore)
+    (unwind-protect
+        (sprite-run-batch :ops '((:op sprite-test--entry-nilary)) :args '(1))
+      (advice-remove 'sprite-test--entry-nilary #'ignore))
+    (should (equal sprite-test--entry-calls '(nilary)))))
+
+(ert-deftest sprite-batch/form-entry-evaluates-lexically ()
+  (let ((sprite-test--entry-calls nil)
+        (noninteractive t))
+    (sprite-run-batch :ops '((:form (push 'form sprite-test--entry-calls) :name "push form")))
+    (should (equal sprite-test--entry-calls '(form)))))
+
+(ert-deftest sprite-batch/form-entry-requires-name ()
+  (should-error (sprite-batch--resolve-entry '(:form (ignore)) nil) :type 'user-error)
+  (should-error (sprite-batch--resolve-entry '(:form (ignore) :name "") nil)
+                :type 'user-error)
+  (should (consp (sprite-batch--resolve-entry '(:form (ignore) :name "ok") nil))))
+
+(ert-deftest sprite-batch/malformed-entries-signal-user-error ()
+  (dolist (entry '((:op) (:op ignore :bogus 1) (:op ignore :args)
+                   (:form (ignore) :name "x" :args (1))))
+    (should-error (sprite-batch--resolve-entry entry nil) :type 'user-error)))
+
+(ert-deftest sprite-batch/entry-label-prefers-name ()
+  (should (equal (car (sprite-batch--resolve-entry '(:op ignore :name "quiet") nil))
+                 "quiet"))
+  (should (eq (car (sprite-batch--resolve-entry '(:op ignore) nil)) 'ignore)))
+
+(ert-deftest sprite-batch/failure-message-names-source-op-and-error ()
+  "A failing operation reports sprite-run-batch, what failed, and the error."
+  (let ((messages nil)
+        (noninteractive t))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+      (sprite-run-batch :ops '((:form (error "kaboom") :name "explode")
+                               (:op sprite-test--missing-fn)
+                               (:form (push 'still-runs sprite-test--entry-calls)
+                                      :name "after failures"))))
+    (should (seq-some (lambda (m) (string-match-p
+                                   "sprite-run-batch operation \\\"explode\\\" failed: kaboom" m))
+                      messages))
+    (should (seq-some (lambda (m) (string-match-p
+                                   "sprite-run-batch operation sprite-test--missing-fn failed" m))
+                      messages))))
+
 (provide 'test-sprite-batch)
 ;;; test-sprite-batch.el ends here

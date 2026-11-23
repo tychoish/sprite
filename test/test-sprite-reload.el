@@ -83,5 +83,13 @@
         (sprite-state-reload-hook '(sprite-test-reload--finished)))
     (sprite-state-reload)
     (should sprite-test-reload-finished)))
+(ert-deftest sprite/reload-ignores-op-and-form-entries ()
+  "Only `:mode' entries are audited for recovery."
+  (let ((sprite-startup-operations '((:op ignore) (:form (ignore) :name "noop")
+                                     (:mode sprite-test-reload-mode)))
+        (sprite-test-reload-mode t))
+    (cl-letf (((symbol-function 'sprite-batch-startup)
+               (lambda (&rest _) (ert-fail "Unexpected startup"))))
+      (should-not (sprite-state-reload)))))
 (provide 'test-sprite-reload)
 ;;; test-sprite-reload.el ends here
