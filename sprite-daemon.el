@@ -488,6 +488,40 @@ Each candidate is annotated with index and uptime.  Specify PROMPT text."
     (when s
       (setf (sprite-start-time (sprite--registry-get full-name)) (current-time)))))
 
+;;;###autoload
+(defun sprite-restart-all ()
+  "Restart all currently running sprites belonging to this instance.
+Continues past individual restart errors, returning the list of
+restarted sprite full names."
+  (interactive)
+  (let ((running (sprite--running-list))
+        (restarted nil)
+        (failed nil))
+    (if (null running)
+        (progn
+          (message "No running sprites to restart")
+          nil)
+      (dolist (s running)
+        (let ((name (sprite-name s)))
+          (condition-case err
+              (progn
+                (sprite-restart name)
+                (push name restarted))
+            (error
+             (push (cons name (error-message-string err)) failed)))))
+      (setq restarted (nreverse restarted)
+            failed (nreverse failed))
+      (if failed
+          (message "Restarted %d sprite(s); %d failed (%s)"
+                   (length restarted)
+                   (length failed)
+                   (mapconcat (lambda (f) (format "%s: %s" (car f) (cdr f)))
+                              failed ", "))
+        (message "Restarted %d sprite(s): %s"
+                 (length restarted)
+                 (mapconcat #'identity restarted ", ")))
+      restarted)))
+
 (defun sprite-decommission (name)
   "Decommission sprite NAME: stop it and write the DECOMMISSIONED marker."
   (interactive (list (sprite--completing-read "Decommission sprite: ")))
@@ -696,11 +730,49 @@ sprite name is already decommissioned or present in the registry."
          (setq needed 0)))
      (nconc available (nreverse created-list))))
 
+;;;###autoload
+(cl-defun sprite-start-sprites (count &key timeout)
+  "Start COUNT new worker sprites, respecting `sprite-max-count'.
+When called interactively, uses numeric prefix arg COUNT or prompts
+for a positive integer.  TIMEOUT is passed to `sprite-create'.
+Returns the list of newly created `sprite' structs."
+  (interactive
+   (list (if current-prefix-arg
+             (prefix-numeric-value current-prefix-arg)
+           (read-number "Number of sprites to start: " 1))))
+  (unless (and (integerp count) (> count 0))
+    (user-error "Count must be a positive integer: %S" count))
+  (let* ((active-count (length (sprite--running-list)))
+         (capacity (- sprite-max-count active-count)))
+    (when (<= capacity 0)
+      (user-error "Cannot start sprites: %d running (sprite-max-count is %d)"
+                  active-count sprite-max-count))
+    (let ((to-start (min count capacity))
+          (created nil))
+      (dotimes (_ to-start)
+        (let* ((parent (sprite-instance-name))
+               (idx (sprite--next-idx parent))
+               (wname (sprite--next-worker-name parent idx active-count))
+               (s (sprite-create wname :timeout timeout)))
+          (push s created)
+          (cl-incf active-count)))
+      (setq created (nreverse created))
+      (if (< (length created) count)
+          (message "Started %d of %d requested sprite(s) (sprite-max-count %d reached): %s"
+                   (length created) count sprite-max-count
+                   (mapconcat #'sprite-name created ", "))
+        (message "Started %d sprite(s): %s"
+                 (length created)
+                 (mapconcat #'sprite-name created ", ")))
+      created)))
+
 
 ;;;; Global minor mode
 
 (defvar-keymap sprite-mode-command-map
   "c" #'sprite-create
+  "S" #'sprite-start-sprites
+  "R" #'sprite-restart-all
   "l" #'sprite-list
   "o" #'sprite-open-frame
   "n" #'sprite-get-or-create-next)

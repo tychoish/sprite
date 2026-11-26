@@ -100,8 +100,10 @@
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "c") #'sprite-list-create)
+    (define-key map (kbd "S") #'sprite-list-start-sprites)
     (define-key map (kbd "d") #'sprite-list-decommission)
     (define-key map (kbd "r") #'sprite-list-restart)
+    (define-key map (kbd "R") #'sprite-list-restart-all)
     (define-key map (kbd "s") #'sprite-list-stop)
     (define-key map (kbd "p") #'sprite-list-check)
     (define-key map (kbd "o") #'sprite-list-open-log)
@@ -233,6 +235,12 @@ Signals an error if point is on the parent-instance row."
   (call-interactively #'sprite-create)
   (sprite-list-refresh))
 
+(defun sprite-list-start-sprites ()
+  "Start N worker sprites and refresh the overview buffer."
+  (interactive)
+  (call-interactively #'sprite-start-sprites)
+  (sprite-list-refresh))
+
 (defun sprite-list-decommission ()
   "Decommission the sprite at point."
   (interactive)
@@ -245,6 +253,12 @@ Signals an error if point is on the parent-instance row."
   "Restart the sprite at point."
   (interactive)
   (sprite-restart (sprite-name (sprite-list--sprite-at-point)))
+  (sprite-list-refresh))
+
+(defun sprite-list-restart-all ()
+  "Restart all running sprites and refresh the overview buffer."
+  (interactive)
+  (sprite-restart-all)
   (sprite-list-refresh))
 
 (defun sprite-list-stop ()
@@ -279,10 +293,12 @@ Updates the sprite's running status and refreshes the list."
   "Actions for the sprite overview buffer."
   [["Sprite"
     ("c" "Create"       sprite-list-create)
+    ("S" "Start N..."   sprite-list-start-sprites)
     ("d" "Decommission" sprite-list-decommission
      :inapt-if-not sprite-list--sprite-at-point-p)
     ("r" "Restart"      sprite-list-restart
      :inapt-if-not sprite-list--sprite-at-point-p)
+    ("R" "Restart all"  sprite-list-restart-all)
     ("s" "Stop"         sprite-list-stop
      :inapt-if-not sprite-list--sprite-at-point-p)
     ("p" "Check/ping"   sprite-list-check

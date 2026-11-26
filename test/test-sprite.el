@@ -1221,5 +1221,113 @@ and `sprite-communication-fallback' is non-nil."
         (should (= val 30))
         (should (null logged))))))
 
+;;;; Fleet restart-all and start-sprites commands
+
+(ert-deftest sprite/restart-all-restarts-only-running-sprites ()
+  "Restart only running sprites and return their full names."
+  (sprite-test/with-registry
+    (let ((restarted nil))
+      (sprite--registry-put (sprite--make :name "work.0.a" :idx 0 :parent "work" :unique-name "a"))
+      (sprite--registry-put (sprite--make :name "work.1.b" :idx 1 :parent "work" :unique-name "b"))
+      (sprite--registry-put (sprite--make :name "work.2.c" :idx 2 :parent "work" :unique-name "c"))
+      (cl-letf (((symbol-function 'sprite-instance-name) (lambda () "work"))
+                ((symbol-function 'sprite--decommissioned-p) (lambda (_) nil))
+                ((symbol-function 'sprite--running-p)
+                 (lambda (name) (member name '("work.0.a" "work.1.b"))))
+                ((symbol-function 'sprite-restart)
+                 (lambda (name) (push name restarted))))
+        (let ((res (sprite-restart-all)))
+          (should (= (length res) 2))
+          (should (member "work.0.a" res))
+          (should (member "work.1.b" res))
+          (should-not (member "work.2.c" res))
+          (should (equal (sort (copy-sequence restarted) #'string<)
+                         '("work.0.a" "work.1.b"))))))))
+
+(ert-deftest sprite/restart-all-empty-returns-nil ()
+  "Return nil without invoking `sprite-restart' when no sprites are running."
+  (sprite-test/with-registry
+    (let ((called nil))
+      (cl-letf (((symbol-function 'sprite--running-list) (lambda () nil))
+                ((symbol-function 'sprite-restart) (lambda (_) (setq called t))))
+        (should-not (sprite-restart-all))
+        (should-not called)))))
+
+(ert-deftest sprite/restart-all-continues-on-error ()
+  "Continue restarting remaining sprites when one restart fails."
+  (sprite-test/with-registry
+    (let ((s1 (sprite--make :name "work.0.a" :idx 0 :parent "work" :unique-name "a"))
+          (s2 (sprite--make :name "work.1.b" :idx 1 :parent "work" :unique-name "b")))
+      (cl-letf (((symbol-function 'sprite--running-list) (lambda () (list s1 s2)))
+                ((symbol-function 'sprite-restart)
+                 (lambda (name)
+                   (when (equal name "work.0.a")
+                     (error "boom")))))
+        (should (equal (sprite-restart-all) '("work.1.b")))))))
+
+(ert-deftest sprite/start-sprites-starts-requested-count ()
+  "Start N worker sprites, skipping historic decommissioned worker names."
+  (sprite-test/with-registry
+    (let ((sprite-max-count 4)
+          (next-idx 1)
+          (created-names nil))
+      (sprite--registry-put (sprite--make :name "work.0.pkg" :idx 0 :parent "work" :unique-name "pkg"))
+      (cl-letf (((symbol-function 'sprite-instance-name) (lambda () "work"))
+                ((symbol-function 'sprite--running-p) (lambda (_) t))
+                ((symbol-function 'sprite--decommissioned-p)
+                 (lambda (full) (equal full "work.1.worker-1")))
+                ((symbol-function 'sprite--next-idx) (lambda (_) next-idx))
+                ((symbol-function 'sprite-create)
+                 (lambda (name &rest _)
+                   (push name created-names)
+                   (let* ((idx next-idx)
+                          (s (sprite--make :name (format "work.%d.%s" idx name)
+                                           :idx idx :parent "work" :unique-name name)))
+                     (setq next-idx (1+ idx))
+                     (sprite--registry-put s)
+                     s))))
+        (let ((res (sprite-start-sprites 2)))
+          (should (= (length res) 2))
+          (should (equal (nreverse created-names) '("worker-2" "worker-2")))
+          (should (equal (mapcar #'sprite-name res)
+                         '("work.1.worker-2" "work.2.worker-2"))))))))
+
+(ert-deftest sprite/start-sprites-caps-at-max-count-and-validates ()
+  "Validate count and enforce `sprite-max-count' capacity."
+  (should-error (sprite-start-sprites 0) :type 'user-error)
+  (should-error (sprite-start-sprites -2) :type 'user-error)
+  (should-error (sprite-start-sprites "2") :type 'user-error)
+  (sprite-test/with-registry
+    (let ((sprite-max-count 2)
+          (created-names nil)
+          (next-idx 1))
+      (sprite--registry-put (sprite--make :name "work.0.pkg" :idx 0 :parent "work" :unique-name "pkg"))
+      (cl-letf (((symbol-function 'sprite-instance-name) (lambda () "work"))
+                ((symbol-function 'sprite--running-p) (lambda (_) t))
+                ((symbol-function 'sprite--decommissioned-p) (lambda (_) nil))
+                ((symbol-function 'sprite--next-idx) (lambda (_) next-idx))
+                ((symbol-function 'sprite-create)
+                 (lambda (name &rest _)
+                   (push name created-names)
+                   (let* ((idx next-idx)
+                          (s (sprite--make :name (format "work.%d.%s" idx name)
+                                           :idx idx :parent "work" :unique-name name)))
+                     (setq next-idx (1+ idx))
+                     (sprite--registry-put s)
+                     s))))
+        ;; Requesting 3 with capacity 1 starts 1
+        (let ((res (sprite-start-sprites 3)))
+          (should (= (length res) 1))
+          (should (equal created-names '("worker-1"))))
+        ;; Now at max-count (2): signals user-error
+        (should-error (sprite-start-sprites 1) :type 'user-error)))))
+
+(ert-deftest sprite/mode-map-and-list-map-bind-fleet-commands ()
+  "Both `sprite-mode-command-map' and `sprite-list-mode-map' bind R and S."
+  (should (eq #'sprite-restart-all (keymap-lookup sprite-mode-command-map "R")))
+  (should (eq #'sprite-start-sprites (keymap-lookup sprite-mode-command-map "S")))
+  (should (eq #'sprite-list-restart-all (keymap-lookup sprite-list-mode-map "R")))
+  (should (eq #'sprite-list-start-sprites (keymap-lookup sprite-list-mode-map "S"))))
+
 (provide 'test-sprite)
 ;;; test-sprite.el ends here
