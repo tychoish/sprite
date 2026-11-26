@@ -792,6 +792,30 @@ and `sprite-communication-fallback' is non-nil."
         (let ((fleet (sprite-get-or-create-fleet 2)))
           (should (= 2 (length fleet))))))))
 
+(ert-deftest sprite/get-or-create-fleet-skips-decommissioned-worker-names ()
+  "Growing a fleet skips historic decommissioned worker names."
+  (sprite-test/with-registry
+    (let ((sprite-max-count 4)
+          (sprite-active-threshold 3600)
+          (created-names nil))
+      (sprite--registry-put (sprite--make :name "work.0.pkg" :idx 0
+                                          :parent "work" :unique-name "pkg"))
+      (cl-letf (((symbol-function 'sprite-instance-name) (lambda () "work"))
+                ((symbol-function 'sprite--next-idx) (lambda (_) 1))
+                ((symbol-function 'sprite--running-p) (lambda (_) t))
+                ((symbol-function 'sprite--decommissioned-p)
+                 (lambda (full) (equal full "work.1.worker-1")))
+                ((symbol-function 'sprite-create)
+                 (lambda (name &rest _)
+                   (push name created-names)
+                   (let ((s (sprite--make :name (format "work.1.%s" name)
+                                          :idx 1 :parent "work" :unique-name name)))
+                     (sprite--registry-put s)
+                     s))))
+        (let ((fleet (sprite-get-or-create-fleet 2)))
+          (should (= 2 (length fleet)))
+          (should (equal created-names '("worker-2"))))))))
+
 (ert-deftest sprite/resolve-list-includes-children-for-controller ()
   (sprite-test/with-registry
     (cl-letf (((symbol-function 'sprite--decommissioned-p) (lambda (_) nil)))

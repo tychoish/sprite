@@ -643,6 +643,20 @@ fleet as busy."
  \"Available\" means running and not recently contacted."
    (seq-find #'sprite--usable-p (sprite-resolve-list)))
 
+(defun sprite--next-worker-name (parent idx &optional start)
+  "Return first non-decommissioned \"worker-N\" name for PARENT at IDX.
+Starts searching from START (default 0), skipping any name whose full
+sprite name is already decommissioned or present in the registry."
+  (let ((n (or start 0))
+        candidate)
+    (while (progn
+             (setq candidate (format "worker-%d" n))
+             (let ((full (sprite--format-full-name parent idx candidate)))
+               (or (sprite--decommissioned-p full)
+                   (sprite--registry-get full))))
+      (setq n (1+ n)))
+    candidate))
+
 ;;;###autoload
 (cl-defun sprite-get-or-create-next (&key timeout)
    "Return the next available sprite, creating one if none are free.
@@ -653,7 +667,10 @@ fleet as busy."
          (if (>= active-count sprite-max-count)
              (user-error "All %d sprite are busy and max-count (%d) reached"
                          active-count sprite-max-count)
-           (sprite-create (format "worker-%d" active-count) :timeout timeout)))))
+           (let* ((parent (sprite-instance-name))
+                  (idx (sprite--next-idx parent))
+                  (wname (sprite--next-worker-name parent idx active-count)))
+             (sprite-create wname :timeout timeout))))))
 
 ;;;###autoload
 (cl-defun sprite-get-or-create-fleet (count &key timeout)
@@ -666,8 +683,11 @@ fleet as busy."
           (created-list nil)
           (created nil))
      (while (and (> needed 0) (< active-count sprite-max-count))
-       (setq created (ignore-errors
-                       (sprite-create (format "worker-%d" active-count) :timeout timeout)))
+       (let* ((parent (sprite-instance-name))
+              (idx (sprite--next-idx parent))
+              (wname (sprite--next-worker-name parent idx active-count)))
+         (setq created (ignore-errors
+                         (sprite-create wname :timeout timeout))))
        (if created
            (progn
              (push created created-list)
