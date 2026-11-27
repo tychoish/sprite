@@ -299,6 +299,18 @@
           (should (= sprite-desktop--failed-count 1))
           (should (= sprite-desktop--completed-count 1)))))))
 
+(ert-deftest sprite-desktop/entry-accessible-without-desktop-helper ()
+  "Check entries without depending on newer desktop functions."
+  (let ((existing (make-temp-file "sprite-access-")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'desktop-access-file)
+                   (lambda (&rest _) (error "Unavailable"))))
+          (should (sprite-desktop--entry-accessible-p (list 208 existing)))
+          (delete-file existing)
+          (should-not (sprite-desktop--entry-accessible-p (list 208 existing)))
+          (should (sprite-desktop--entry-accessible-p '(208 nil))))
+      (when (file-exists-p existing) (delete-file existing)))))
+
 (ert-deftest sprite-desktop/read-skips-missing-files ()
   "sprite-desktop-read drops missing files before staging."
   (sprite-desktop-test/with-env

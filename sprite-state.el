@@ -285,7 +285,6 @@ Return the first error after attempting every cleanup operation."
 (defvar desktop-buffers-not-to-save)
 (defvar desktop-files-not-to-save)
 (declare-function savehist-save "savehist" (&optional auto-save))
-(declare-function desktop-access-file "desktop" (filename))
 (declare-function desktop-read "desktop" (dirname))
 (declare-function desktop-restore-file-buffer "desktop" (buffer-filename buffer-name buffer-misc))
 (declare-function desktop-save "desktop" (dirname &optional release))
@@ -396,7 +395,8 @@ This may be called later in startup after setting
                 (cl-letf (((symbol-function 'desktop-restore-file-buffer)
                            (lambda (filename name misc)
                              (when (or (not (stringp filename))
-                                       (desktop-access-file filename))
+                                       (ignore-errors
+                                         (not (access-file filename "Restoring desktop buffer"))))
                                (funcall orig-restore filename name misc)))))
                   (unless (eq t (funcall read-fn sprite-state--desktop-directory))
                     (error "Unable to read desktop in %s" sprite-state--desktop-directory))))

@@ -148,6 +148,34 @@
         (should (= timers 2))
         (sprite-state-global-mode -1)))))
 
+(ert-deftest sprite-state/eager-restore-without-desktop-access-helper ()
+  "Eager restore skips inaccessible files without newer desktop helpers."
+  (sprite-state-test/with-directory
+    (let ((sprite-state-desktop-enabled t)
+          (sprite-state-desktop-restore-style 'eager)
+          (existing (make-temp-file "sprite-state-access-"))
+          (restored nil))
+      (unwind-protect
+          (progn
+            (make-directory (file-name-directory (sprite-state-path "desktop.el")) t)
+            (write-region "" nil (sprite-state-path "desktop.el") nil 'silent)
+            (cl-letf (((symbol-function 'desktop-access-file)
+                       (lambda (&rest _) (error "Unavailable")))
+                      ((symbol-function 'desktop-restore-file-buffer)
+                       (lambda (file &rest _) (push file restored)))
+                      ((symbol-function 'desktop-read)
+                       (lambda (&rest _)
+                         (desktop-restore-file-buffer existing nil nil)
+                         (desktop-restore-file-buffer (concat existing "-missing") nil nil)
+                         t))
+                      ((symbol-function 'run-with-idle-timer)
+                       (lambda (&rest _) 'fake-timer))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (sprite-state-global-mode 1)
+              (should (equal restored (list existing)))
+              (sprite-state-global-mode -1)))
+        (delete-file existing)))))
+
 (ert-deftest sprite-state/missing-desktop-does-not-read-fallback ()
   (sprite-state-test/with-directory
     (let ((sprite-state-desktop-enabled t) (reads 0))

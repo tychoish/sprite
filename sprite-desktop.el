@@ -318,7 +318,7 @@ overrides for :file, :mode, or :project."
   "Return non-nil when desktop entry ARGS has no file or an accessible file."
   (let ((file (nth 1 args)))
     (or (not (stringp file))
-        (desktop-access-file file))))
+        (ignore-errors (not (access-file file "Restoring desktop buffer"))))))
 
 (defun sprite-desktop--materialize (entry)
   "Materialize ENTRY into a live buffer."
@@ -341,7 +341,8 @@ overrides for :file, :mode, or :project."
               (cl-letf (((symbol-function 'desktop-restore-file-buffer)
                          (lambda (filename name misc)
                            (if (or (not (stringp filename))
-                                   (desktop-access-file filename))
+                                   (ignore-errors
+                                     (not (access-file filename "Restoring desktop buffer"))))
                                (funcall orig-restore filename name misc)
                              (setq missing t)
                              nil))))
