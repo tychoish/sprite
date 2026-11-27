@@ -314,6 +314,12 @@ overrides for :file, :mode, or :project."
 
 ;;; Materialization & Await
 
+(defun sprite-desktop--entry-accessible-p (args)
+  "Return non-nil when desktop entry ARGS has no file or an accessible file."
+  (let ((file (nth 1 args)))
+    (or (not (stringp file))
+        (desktop-access-file file))))
+
 (defun sprite-desktop--materialize (entry)
   "Materialize ENTRY into a live buffer."
   (when entry
@@ -323,14 +329,23 @@ overrides for :file, :mode, or :project."
     (let* ((args (sprite-desktop-entry-args entry))
            (mode (sprite-desktop-entry-mode entry))
            (start (current-time))
+           (missing nil)
            (buf nil))
       (save-window-excursion
         (condition-case e
             (let ((eglox-activation-policy 'when-visible)
                   (desktop-first-buffer nil)
                   (desktop-buffer-ok-count 0)
-                  (desktop-buffer-fail-count 0))
-              (setq buf (apply #'desktop-create-buffer args)))
+                  (desktop-buffer-fail-count 0)
+                  (orig-restore (symbol-function 'desktop-restore-file-buffer)))
+              (cl-letf (((symbol-function 'desktop-restore-file-buffer)
+                         (lambda (filename name misc)
+                           (if (or (not (stringp filename))
+                                   (desktop-access-file filename))
+                               (funcall orig-restore filename name misc)
+                             (setq missing t)
+                             nil))))
+                (setq buf (apply #'desktop-create-buffer args))))
           (error
            (message "[sprite-desktop] Failed to restore %s: %s"
                     (or (sprite-desktop-entry-file entry)
@@ -338,16 +353,19 @@ overrides for :file, :mode, or :project."
                         "buffer")
                     (error-message-string e)))))
       (let ((dur-ms (* 1000.0 (float-time (time-since start)))))
-        (if (and buf (buffer-live-p buf))
-            (progn
-              (setf (sprite-desktop-entry-state entry) 'done)
-              (bury-buffer buf)
-              (sprite-desktop--record-cost mode dur-ms)
-              (when (and (bound-and-true-p eglox-warm-projects)
-                         (fboundp 'eglox-warm-project))
-                (eglox-warm-project buf)))
+        (cond
+         ((and buf (buffer-live-p buf))
+          (setf (sprite-desktop-entry-state entry) 'done)
+          (bury-buffer buf)
+          (sprite-desktop--record-cost mode dur-ms)
+          (when (and (bound-and-true-p eglox-warm-projects)
+                     (fboundp 'eglox-warm-project))
+            (eglox-warm-project buf)))
+         (missing
+          (setf (sprite-desktop-entry-state entry) 'dropped))
+         (t
           (setf (sprite-desktop-entry-state entry) 'failed)
-          (cl-incf sprite-desktop--failed-count)))
+          (cl-incf sprite-desktop--failed-count))))
       (cl-incf sprite-desktop--completed-count)
       (sprite-desktop--log)
       (sprite-desktop--update-indicator)
@@ -571,7 +589,8 @@ Returns immediately.  Opening any listed file later awaits it."
               ((symbol-function 'desktop-lazy-create-buffer)
                (lambda (&rest args) (push args entries) nil)))
       (prog1 (desktop-read dirname)
-        (sprite-desktop--stage (nreverse entries))))))
+        (sprite-desktop--stage
+         (seq-filter #'sprite-desktop--entry-accessible-p (nreverse entries)))))))
 
 ;;; Queue Menu, Progress Logging, & Indicator
 

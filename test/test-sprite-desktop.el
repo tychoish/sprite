@@ -299,6 +299,56 @@
           (should (= sprite-desktop--failed-count 1))
           (should (= sprite-desktop--completed-count 1)))))))
 
+(ert-deftest sprite-desktop/read-skips-missing-files ()
+  "sprite-desktop-read drops missing files before staging."
+  (sprite-desktop-test/with-env
+    (let ((existing (make-temp-file "staged-existing-"))
+          (missing "/tmp/sprite-desktop-definitely-missing-file.el")
+          (sprite-desktop-eager-count 1)
+          (messages nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'desktop-read)
+                     (lambda (&rest _)
+                       (desktop-create-buffer 208 missing "missing" 'text-mode nil 1 nil nil nil)
+                       (desktop-create-buffer 208 existing "existing" 'text-mode nil 1 nil nil nil)
+                       t))
+                    ((symbol-function 'sprite-desktop--start-drain) #'ignore)
+                    ((symbol-function 'message)
+                     (lambda (fmt &rest args)
+                       (push (apply #'format fmt args) messages))))
+            (should (eq t (sprite-desktop-read "/tmp")))
+            (should (= sprite-desktop--total-count 1))
+            (should (= sprite-desktop--failed-count 0))
+            (should-not (seq-some (lambda (m) (string-search "no longer accessible" m))
+                                  messages))
+            (when-let* ((buf (find-buffer-visiting existing)))
+              (kill-buffer buf)))
+        (when (file-exists-p existing)
+          (delete-file existing))))))
+
+(ert-deftest sprite-desktop/materialize-skips-disappeared-file ()
+  "Files removed after staging are dropped quietly without failing."
+  (sprite-desktop-test/with-env
+    (let* ((missing "/tmp/sprite-desktop-disappeared-file.el")
+           (entry (make-sprite-desktop-entry
+                   :args (list 208 missing "missing" 'text-mode nil 1 nil nil nil)
+                   :file missing
+                   :mode 'text-mode
+                   :lane 'light
+                   :state 'pending))
+           (messages nil))
+      (push entry (alist-get 'light sprite-desktop--queue))
+      (puthash missing entry sprite-desktop--index)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (push (apply #'format fmt args) messages))))
+        (should (null (sprite-desktop--materialize entry)))
+        (should (eq (sprite-desktop-entry-state entry) 'dropped))
+        (should (= sprite-desktop--failed-count 0))
+        (should (= sprite-desktop--completed-count 1))
+        (should-not (seq-some (lambda (m) (string-search "no longer accessible" m))
+                              messages))))))
+
 (ert-deftest sprite-desktop/indicator-string ()
   "Indicator string formats correctly and includes lsp count when bound."
   (sprite-desktop-test/with-env
