@@ -285,7 +285,9 @@ Return the first error after attempting every cleanup operation."
 (defvar desktop-buffers-not-to-save)
 (defvar desktop-files-not-to-save)
 (declare-function savehist-save "savehist" (&optional auto-save))
+(declare-function desktop-access-file "desktop" (filename))
 (declare-function desktop-read "desktop" (dirname))
+(declare-function desktop-restore-file-buffer "desktop" (buffer-filename buffer-name buffer-misc))
 (declare-function desktop-save "desktop" (dirname &optional release))
 (declare-function sprite-desktop-read "sprite-desktop" (&optional dirname))
 (declare-function sprite-desktop-pause "sprite-desktop" ())
@@ -389,9 +391,15 @@ This may be called later in startup after setting
                        (not (equal file sprite-state--restored-file)))
               (let ((read-fn (if (eq sprite-state-desktop-restore-style 'staged)
                                  #'sprite-desktop-read
-                               #'desktop-read)))
-                (unless (eq t (funcall read-fn sprite-state--desktop-directory))
-                  (error "Unable to read desktop in %s" sprite-state--desktop-directory)))
+                               #'desktop-read))
+                    (orig-restore (symbol-function 'desktop-restore-file-buffer)))
+                (cl-letf (((symbol-function 'desktop-restore-file-buffer)
+                           (lambda (filename name misc)
+                             (when (or (not (stringp filename))
+                                       (desktop-access-file filename))
+                               (funcall orig-restore filename name misc)))))
+                  (unless (eq t (funcall read-fn sprite-state--desktop-directory))
+                    (error "Unable to read desktop in %s" sprite-state--desktop-directory))))
               (setq sprite-state--restored-file file)))
           (setq sprite-state--desktop-timer
                 (run-with-idle-timer sprite-state-desktop-idle-interval t
